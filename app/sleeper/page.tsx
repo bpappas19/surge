@@ -1,0 +1,214 @@
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { getUser, getUserLeagues, avatarUrl, SleeperLeague } from "@/lib/sleeper";
+import { getSleeperSettings } from "@/lib/storage";
+import { getLeagueConfig } from "@/lib/supabase";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Search,
+  AlertCircle,
+  Users,
+  Moon,
+} from "lucide-react";
+
+// ─── Input class ─────────────────────────────────────────────────────────────
+
+const inputCls =
+  "w-full bg-navy-900 border border-navy-700 focus:border-teal-500/40 " +
+  "rounded-lg px-3.5 py-2.5 text-sm " +
+  "text-slate-100 placeholder:text-slate-600 outline-none transition-colors";
+
+// ─── Status badge ─────────────────────────────────────────────────────────────
+
+function StatusBadge({ status }: { status: string }) {
+  const map: Record<string, { label: string; cls: string }> = {
+    complete:  { label: "Complete",  cls: "text-emerald-400 bg-emerald-500/10 border-emerald-500/25" },
+    in_season: { label: "Live",      cls: "text-amber-400  bg-amber-500/10  border-amber-500/25" },
+    drafting:  { label: "Drafting",  cls: "text-sky-400    bg-sky-500/10    border-sky-500/25" },
+    pre_draft: { label: "Pre-draft", cls: "text-slate-400  bg-slate-500/10  border-slate-500/25" },
+  };
+  const s = map[status] ?? { label: status, cls: "text-slate-400 bg-slate-500/10 border-slate-500/25" };
+  return (
+    <span className={`text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded border ${s.cls}`}>
+      {s.label}
+    </span>
+  );
+}
+
+// ─── League row ───────────────────────────────────────────────────────────────
+
+function LeagueRow({ league, onClick }: { league: SleeperLeague; onClick: () => void }) {
+  const img = avatarUrl(league.avatar);
+  return (
+    <button
+      onClick={onClick}
+      className="group w-full flex items-center gap-3 px-4 py-3.5 hover:bg-navy-750 active:bg-navy-700 transition-colors text-left"
+    >
+      {img ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={img} alt={league.name} className="w-9 h-9 rounded-lg object-cover flex-shrink-0" />
+      ) : (
+        <div className="w-9 h-9 rounded-lg bg-navy-700 flex items-center justify-center flex-shrink-0">
+          <Moon className="w-4 h-4 text-slate-500" strokeWidth={1.5} />
+        </div>
+      )}
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-slate-100 truncate">{league.name}</p>
+        <div className="flex items-center gap-2 mt-0.5">
+          <span className="text-xs text-slate-500 flex items-center gap-1">
+            <Users className="w-3 h-3" strokeWidth={1.5} />
+            {league.total_rosters}
+          </span>
+          <span className="text-navy-600">·</span>
+          <span className="text-xs text-slate-500">{league.season}</span>
+          <StatusBadge status={league.status} />
+        </div>
+      </div>
+      <ChevronRight
+        className="w-4 h-4 text-slate-700 group-hover:text-slate-400 flex-shrink-0 transition-colors"
+        strokeWidth={1.5}
+      />
+    </button>
+  );
+}
+
+// ─── Page ──────────────────────────────────────────────────────────────────────
+
+export default function SleeperPage() {
+  const router = useRouter();
+  const [username, setUsername] = useState("");
+  const [loading, setLoading]   = useState(false);
+  const [error, setError]       = useState("");
+  const [leagues, setLeagues]   = useState<SleeperLeague[] | null>(null);
+
+  async function handleSearch(e: React.FormEvent) {
+    e.preventDefault();
+    const q = username.trim().toLowerCase();
+    if (!q) return;
+
+    setLoading(true);
+    setError("");
+    setLeagues(null);
+
+    try {
+      const user = await getUser(q);
+      const data = await getUserLeagues(user.user_id, "2025");
+      setLeagues(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <main
+      className="bg-navy-950 flex flex-col items-center px-4 pb-12 pt-[12vh]"
+      style={{ minHeight: "calc(100vh - 56px)" }}
+    >
+
+      <div className="w-full max-w-[520px] sm:max-w-[620px] lg:max-w-[720px] bg-navy-800 border border-navy-700 rounded-2xl overflow-hidden">
+
+        {/* Card header */}
+        <div className="flex items-start gap-3 px-8 pt-7 pb-5 lg:px-10 lg:pt-9 lg:pb-7 border-b border-navy-700">
+          <Link href="/" className="text-slate-500 hover:text-slate-300 transition-colors p-1 -ml-1 flex-shrink-0 mt-0.5">
+            <ChevronLeft className="w-5 h-5" strokeWidth={1.5} />
+          </Link>
+          <div>
+            <p className="text-sm lg:text-base font-semibold text-slate-100">Connect Sleeper</p>
+            <p className="text-xs lg:text-sm text-slate-500 mt-1 leading-relaxed">
+              Enter your Sleeper username to automatically sync your league
+            </p>
+          </div>
+        </div>
+
+        {/* Search form */}
+        <div className="px-8 py-7 lg:px-10 lg:py-9">
+          <form onSubmit={handleSearch} className="space-y-3">
+            <div className="relative">
+              <Search
+                className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-600 pointer-events-none"
+                strokeWidth={1.5}
+              />
+              <input
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="Sleeper username"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                className={`${inputCls} pl-10`}
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={loading || !username.trim()}
+              className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-[#ffffff] font-medium rounded-lg py-2.5 text-sm transition-colors"
+            >
+              {loading ? (
+                <>
+                  <span className="w-3.5 h-3.5 border-2 border-black/20 border-t-black rounded-full animate-spin" />
+                  Searching…
+                </>
+              ) : (
+                "Find leagues"
+              )}
+            </button>
+          </form>
+
+          {error && (
+            <div className="mt-4 flex items-start gap-2.5 bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-3">
+              <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" strokeWidth={1.5} />
+              <p className="text-red-400 text-sm">{error}</p>
+            </div>
+          )}
+        </div>
+
+        {/* League list */}
+        {leagues !== null && (
+          leagues.length === 0 ? (
+            <div className="border-t border-navy-700 px-5 py-8 text-center">
+              <p className="text-sm text-slate-500">No 2025 NFL leagues found for this username.</p>
+            </div>
+          ) : (
+            <div className="border-t border-navy-700">
+              <p className="text-xs font-medium text-slate-600 uppercase tracking-wider px-5 pt-4 pb-2">
+                {leagues.length} league{leagues.length !== 1 ? "s" : ""}
+              </p>
+              <div className="divide-y divide-navy-700">
+                {leagues.map((league) => (
+                  <LeagueRow
+                    key={league.league_id}
+                    league={league}
+                    onClick={async () => {
+                    const [supaConfig, local] = await Promise.all([
+                      getLeagueConfig(league.league_id).catch(() => null),
+                      Promise.resolve(getSleeperSettings(league.league_id)),
+                    ]);
+                    const hasConfig = supaConfig !== null || local !== null;
+                    router.push(
+                      hasConfig
+                        ? `/league/${league.league_id}`
+                        : `/league/${league.league_id}/setup`
+                    );
+                  }}
+                  />
+                ))}
+              </div>
+            </div>
+          )
+        )}
+
+      </div>
+
+      <p className="text-xs text-slate-700 text-center mt-4">
+        Your Sleeper data is read-only and never stored.
+      </p>
+    </main>
+  );
+}

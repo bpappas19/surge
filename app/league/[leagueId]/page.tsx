@@ -3,30 +3,35 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import Logo from "@/components/Logo";
 import {
   getLeague,
   getLeagueRosters,
   getLeagueUsers,
   getMatchups,
+  getWeekPlayerStats,
+  countPlayerTDs,
   avatarUrl,
   SleeperLeague,
   SleeperLeagueUser,
   SleeperRoster,
+  SleeperMatchup,
+  SleeperPlayerStats,
 } from "@/lib/sleeper";
+import { getSleeperSettings } from "@/lib/storage";
+import { getLeagueConfig, SleeperLeagueConfig } from "@/lib/supabase";
+import { calculateSeasonTaxes, calculateWeekTaxes, totalPot } from "@/lib/calc";
+import type { ManualLeague, WeekEntry, MilestoneRule } from "@/lib/types";
 import {
   ChevronLeft,
   ChevronRight,
-  DollarSign,
   TrendingDown,
   Trophy,
   AlertCircle,
   RefreshCw,
+  Settings,
 } from "lucide-react";
 
-const TAX = 25;
-
-// ─── Types ──────────────────────────────────────────────────────────────────
+// ─── Types ─────────────────────────────────────────────────────────────────
 
 interface TeamInfo {
   rosterId: number;
@@ -36,67 +41,90 @@ interface TeamInfo {
   avatar: string | null;
 }
 
-interface WeekResult {
-  week: number;
-  lowestRosterId: number;
-  lowestPts: number;
+// ─── Helpers ───────────────────────────────────────────────────────────────
+
+/**
+ * Builds a WeekEntry from raw Sleeper matchup + player-stats data.
+ * Evaluates each milestone rule to find qualifying teams.
+ */
+function buildWeekEntry(
+  week: number,
+  leagueId: string,
+  matchups: SleeperMatchup[],
+  milestones: MilestoneRule[],
+  playerStats: Record<string, SleeperPlayerStats>
+): WeekEntry | null {
+  const valid = matchups.filter((m) => m.points > 0);
+  if (!valid.length) return null;
+
+  const lowest = valid.reduce((min, m) => (m.points < min.points ? m : min));
+
+  const milestoneResults = milestones.map((rule) => {
+    let qualifyingTeamIds: string[];
+
+    if (rule.type === "points") {
+      qualifyingTeamIds = valid
+        .filter((m) => m.points >= rule.threshold)
+        .map((m) => String(m.roster_id));
+    } else {
+      // touchdowns — team qualifies if any starter had X+ TDs
+      qualifyingTeamIds = valid
+        .filter((m) =>
+          m.starters.some(
+            (playerId) => countPlayerTDs(playerStats[playerId]) >= rule.threshold
+          )
+        )
+        .map((m) => String(m.roster_id));
+    }
+
+    return { qualifyingTeamIds };
+  });
+
+  return {
+    leagueId,
+    week,
+    lowestScorerTeamId: String(lowest.roster_id),
+    milestoneResults,
+    submittedAt: "",
+  };
 }
 
-// ─── Sub-components ─────────────────────────────────────────────────────────
+// ─── Avatar ────────────────────────────────────────────────────────────────
 
 function Avatar({
   src,
   name,
   size = "md",
-  ring = false,
+  className = "",
 }: {
   src?: string;
   name: string;
   size?: "sm" | "md";
-  ring?: boolean;
+  className?: string;
 }) {
-  const dim = size === "sm" ? "w-8 h-8 text-xs" : "w-10 h-10 text-sm";
-  const ringCls = ring ? "ring-2 ring-green-400/30" : "";
+  const dim = size === "sm" ? "w-7 h-7 text-[10px]" : "w-9 h-9 text-xs";
+  const letter = name.charAt(0).toUpperCase();
+
   if (src) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
-      <img src={src} alt={name} className={`${dim} ${ringCls} rounded-full object-cover flex-shrink-0`} />
+      <img
+        src={src}
+        alt={name}
+        className={`${dim} ${className} rounded-full object-cover flex-shrink-0`}
+      />
     );
   }
   return (
-    <div className={`${dim} ${ringCls} rounded-full bg-slate-800 flex items-center justify-center flex-shrink-0 font-bold text-slate-400`}>
-      {name.charAt(0).toUpperCase()}
+    <div
+      className={`${dim} ${className} rounded-full bg-navy-700 flex items-center justify-center flex-shrink-0 font-semibold text-slate-500`}
+    >
+      {letter}
     </div>
   );
 }
 
-function PotCard({ total, weeks }: { total: number; weeks: number }) {
-  return (
-    <div className="relative overflow-hidden bg-gradient-to-br from-green-500/20 via-green-500/10 to-transparent border border-green-500/30 rounded-2xl p-5">
-      {/* Decorative glow */}
-      <div className="absolute -top-6 -right-6 w-32 h-32 bg-green-500/10 rounded-full blur-2xl pointer-events-none" />
-
-      <div className="flex items-start justify-between relative">
-        <div>
-          <p className="text-xs font-semibold text-green-400 uppercase tracking-widest mb-1">
-            Total Pot
-          </p>
-          <p className="text-5xl font-black text-white tabular-nums">
-            ${total.toLocaleString()}
-          </p>
-          <p className="text-sm text-slate-400 mt-2">
-            {weeks} week{weeks !== 1 ? "s" : ""} · $25 per lowest scorer
-          </p>
-        </div>
-        <div className="bg-green-500/20 rounded-xl p-3 flex-shrink-0">
-          <DollarSign className="w-6 h-6 text-green-400" />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Page ───────────────────────────────────────────────────────────────────
+// ─── Page ──────────────────────────────────────────────────────────────────
 
 export default function LeagueDashboard() {
   const { leagueId } = useParams<{ leagueId: string }>();
@@ -104,7 +132,9 @@ export default function LeagueDashboard() {
 
   const [league, setLeague]           = useState<SleeperLeague | null>(null);
   const [teams, setTeams]             = useState<Map<number, TeamInfo>>(new Map());
-  const [weekResults, setWeekResults] = useState<WeekResult[]>([]);
+  const [config, setConfig]           = useState<SleeperLeagueConfig | null>(null);
+  const [weekEntries, setWeekEntries] = useState<WeekEntry[]>([]);
+  const [weekLowPts, setWeekLowPts]   = useState<Map<number, number>>(new Map());
   const [loading, setLoading]         = useState(true);
   const [loadingMsg, setLoadingMsg]   = useState("Loading league…");
   const [error, setError]             = useState("");
@@ -115,15 +145,37 @@ export default function LeagueDashboard() {
       setError("");
       setLoadingMsg("Loading league…");
 
-      // ── 1. Fetch core data in parallel ──
-      const [leagueData, rosters, users] = await Promise.all([
+      // Load league data + Supabase config in parallel
+      const [leagueData, rosters, users, leagueConfig] = await Promise.all([
         getLeague(leagueId),
         getLeagueRosters(leagueId),
         getLeagueUsers(leagueId),
+        getLeagueConfig(leagueId).catch(() => null),
       ]);
+
       setLeague(leagueData);
 
-      // ── 2. Build team map ──
+      // Resolve config: Supabase → localStorage fallback → redirect to setup
+      let resolvedConfig: SleeperLeagueConfig | null = leagueConfig;
+      if (!resolvedConfig) {
+        const local = getSleeperSettings(leagueId);
+        if (local) {
+          resolvedConfig = {
+            league_id:    leagueId,
+            season:       leagueData.season,
+            buy_in:       local.buyIn,
+            team_count:   local.teamCount,
+            base_penalty: 25,
+            milestones:   [],
+          };
+        } else {
+          router.replace(`/league/${leagueId}/setup`);
+          return;
+        }
+      }
+      setConfig(resolvedConfig);
+
+      // Build team map
       const userMap = new Map<string, SleeperLeagueUser>(
         users.map((u) => [u.user_id, u])
       );
@@ -140,209 +192,345 @@ export default function LeagueDashboard() {
       });
       setTeams(teamMap);
 
-      // ── 3. Determine regular-season week range ──
-      const playoffStart = leagueData.settings?.playoff_week_start ?? 15;
-      const lastScored   = leagueData.settings?.last_scored_leg ?? 0;
-      const maxRegular   = playoffStart - 1;
-      const weeksToFetch = Math.min(lastScored > 0 ? lastScored : maxRegular, maxRegular);
+      // Determine regular-season weeks
+      const playoffStart   = leagueData.settings?.playoff_week_start ?? 15;
+      const lastScored     = leagueData.settings?.last_scored_leg ?? 0;
+      const maxRegular     = playoffStart - 1;
+      const weeksToFetch   = Math.min(lastScored > 0 ? lastScored : maxRegular, maxRegular);
+      if (weeksToFetch < 1) { setLoading(false); return; }
 
-      if (weeksToFetch < 1) {
-        setLoading(false);
-        return;
-      }
+      setLoadingMsg(`Loading ${weeksToFetch} weeks…`);
 
-      // ── 4. Fetch all weeks in parallel ──
-      setLoadingMsg(`Loading ${weeksToFetch} weeks of matchups…`);
+      const weekNums       = Array.from({ length: weeksToFetch }, (_, i) => i + 1);
+      const hasTDMilestone = resolvedConfig.milestones.some((m) => m.type === "touchdowns");
 
-      const weekNums = Array.from({ length: weeksToFetch }, (_, i) => i + 1);
-      const allMatchups = await Promise.all(
-        weekNums.map((w) => getMatchups(leagueId, w).catch(() => []))
-      );
+      // Fetch matchups + (if needed) player stats in parallel
+      const [allMatchups, allPlayerStats] = await Promise.all([
+        Promise.all(weekNums.map((w) => getMatchups(leagueId, w).catch(() => []))),
+        hasTDMilestone
+          ? Promise.all(
+              weekNums.map((w) =>
+                getWeekPlayerStats(leagueData.season, w).catch(
+                  (): Record<string, SleeperPlayerStats> => ({})
+                )
+              )
+            )
+          : Promise.resolve(
+              weekNums.map((): Record<string, SleeperPlayerStats> => ({}))
+            ),
+      ]);
 
-      const results: WeekResult[] = [];
+      // Build WeekEntry objects
+      const entries: WeekEntry[]       = [];
+      const lowPtsMap                   = new Map<number, number>();
+
       allMatchups.forEach((matchups, i) => {
-        const week = weekNums[i];
-        if (!matchups.length) return;
         const valid = matchups.filter((m) => m.points > 0);
         if (!valid.length) return;
         const lowest = valid.reduce((min, m) => (m.points < min.points ? m : min));
-        results.push({ week, lowestRosterId: lowest.roster_id, lowestPts: lowest.points });
+        lowPtsMap.set(weekNums[i], lowest.points);
+
+        const entry = buildWeekEntry(
+          weekNums[i],
+          leagueId,
+          matchups,
+          resolvedConfig!.milestones,
+          allPlayerStats[i]
+        );
+        if (entry) entries.push(entry);
       });
 
-      setWeekResults(results);
+      setWeekEntries(entries);
+      setWeekLowPts(lowPtsMap);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load league.");
     } finally {
       setLoading(false);
     }
-  }, [leagueId]);
+  }, [leagueId, router]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // ── Derived: per-team taxes ──
-  const teamTaxes = useMemo(() => {
-    const map = new Map<number, { info: TeamInfo; owed: number; weeks: number[] }>();
-    teams.forEach((info, id) => map.set(id, { info, owed: 0, weeks: [] }));
-    weekResults.forEach(({ lowestRosterId, week }) => {
-      const t = map.get(lowestRosterId);
-      if (t) { t.owed += TAX; t.weeks.push(week); }
-    });
-    return Array.from(map.values()).sort((a, b) => b.owed - a.owed || a.info.teamName.localeCompare(b.info.teamName));
-  }, [teams, weekResults]);
+  // ── Derived data ────────────────────────────────────────────────────────
 
-  const potTotal = weekResults.length * TAX;
+  const adaptedLeague = useMemo<ManualLeague | null>(() => {
+    if (!config || teams.size === 0) return null;
+    return {
+      id:    leagueId,
+      name:  league?.name ?? "",
+      teams: Array.from(teams.values()).map((t) => ({
+        id:   String(t.rosterId),
+        name: t.teamName,
+      })),
+      config: {
+        basePenalty: config.base_penalty,
+        milestones:  config.milestones,
+        buyIn:       config.buy_in,
+      },
+      createdAt: config.created_at ?? "",
+    };
+  }, [config, teams, leagueId, league]);
 
-  // ─── Loading ────────────────────────────────────────────────────────────
+  const seasonRecords = useMemo(
+    () =>
+      adaptedLeague && weekEntries.length > 0
+        ? calculateSeasonTaxes(weekEntries, adaptedLeague)
+        : [],
+    [adaptedLeague, weekEntries]
+  );
+
+  const surgeTotal = useMemo(
+    () => (adaptedLeague ? totalPot(weekEntries, adaptedLeague) : 0),
+    [adaptedLeague, weekEntries]
+  );
+
+  const startingPot = config ? config.buy_in * config.team_count : 0;
+
+  function teamById(id: string): TeamInfo | undefined {
+    return teams.get(Number(id));
+  }
+
+  // ── Loading ──────────────────────────────────────────────────────────────
+
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#080810] flex flex-col items-center justify-center gap-5">
-        <Logo size="md" />
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 border-2 border-green-500/30 border-t-green-500 rounded-full animate-spin" />
-          <p className="text-slate-500 text-sm">{loadingMsg}</p>
-        </div>
+      <div className="min-h-[60vh] flex flex-col items-center justify-center gap-3">
+        <div className="w-7 h-7 border-2 border-navy-700 border-t-emerald-500 rounded-full animate-spin" />
+        <p className="text-slate-600 text-sm">{loadingMsg}</p>
       </div>
     );
   }
 
-  // ─── Error ──────────────────────────────────────────────────────────────
+  // ── Error ────────────────────────────────────────────────────────────────
+
   if (error) {
     return (
-      <div className="min-h-screen bg-[#080810] flex flex-col items-center justify-center gap-4 px-4">
-        <div className="bg-red-500/10 border border-red-500/25 rounded-2xl p-6 max-w-sm w-full text-center">
-          <AlertCircle className="w-8 h-8 text-red-400 mx-auto mb-3" />
+      <div className="min-h-screen bg-navy-950 flex flex-col items-center justify-center gap-4 px-4">
+        <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-6 max-w-sm w-full text-center">
+          <AlertCircle className="w-7 h-7 text-red-400 mx-auto mb-3" strokeWidth={1.5} />
           <p className="text-red-400 text-sm leading-relaxed">{error}</p>
           <button
             onClick={loadData}
-            className="mt-4 flex items-center gap-1.5 mx-auto text-sm text-green-400 hover:text-green-300 transition-colors"
+            className="mt-4 flex items-center gap-1.5 mx-auto text-sm text-emerald-400 hover:text-emerald-300 transition-colors"
           >
-            <RefreshCw className="w-3.5 h-3.5" />
-            Try again
+            <RefreshCw className="w-3.5 h-3.5" strokeWidth={1.5} />
+            Retry
           </button>
         </div>
       </div>
     );
   }
 
-  // ─── Render ─────────────────────────────────────────────────────────────
+  // ── Render ───────────────────────────────────────────────────────────────
+
   return (
-    <main className="min-h-screen bg-[#080810] pb-10">
+    <main className="min-h-screen bg-navy-950 pb-12">
 
-      {/* ── Sticky header ── */}
-      <header className="sticky top-0 z-20 bg-[#080810]/90 backdrop-blur-md border-b border-[#1c1c30] px-4 py-3">
-        <div className="flex items-center gap-3 max-w-2xl mx-auto">
-          <button
-            onClick={() => router.back()}
-            className="text-slate-500 hover:text-white transition-colors p-1 -ml-1 rounded-lg"
-            aria-label="Go back"
-          >
-            <ChevronLeft className="w-5 h-5" />
-          </button>
-          <div className="flex-1 min-w-0">
-            <h1 className="font-bold text-white text-sm leading-tight truncate">
-              {league?.name ?? "League"}
-            </h1>
-            <p className="text-xs text-slate-600">
-              {league?.season} · {league?.total_rosters} teams
-            </p>
-          </div>
-          <Logo size="xs" />
+      {/* Inline page header */}
+      <div className="w-full max-w-2xl mx-auto px-4 pt-5 pb-2 flex items-center gap-3">
+        <button
+          onClick={() => router.back()}
+          className="text-slate-500 hover:text-slate-300 transition-colors p-1 -ml-1 flex-shrink-0"
+        >
+          <ChevronLeft className="w-5 h-5" strokeWidth={1.5} />
+        </button>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-slate-100 truncate">
+            {league?.name ?? "League"}
+          </p>
+          <p className="text-xs text-slate-600">
+            {league?.season} · {league?.total_rosters} teams
+          </p>
         </div>
-      </header>
+        <Link
+          href={`/league/${leagueId}/setup`}
+          className="text-slate-600 hover:text-slate-300 transition-colors p-1"
+          title="Edit league settings"
+        >
+          <Settings className="w-4 h-4" strokeWidth={1.5} />
+        </Link>
+      </div>
 
-      <div className="px-4 max-w-2xl mx-auto mt-5 space-y-5">
+      <div className="w-full max-w-2xl mx-auto px-4 space-y-4">
 
-        {/* ── Pot total card ── */}
-        <PotCard total={potTotal} weeks={weekResults.length} />
+        {/* ── Pot total ── */}
+        <div className="bg-navy-800 border border-navy-700 rounded-xl p-5">
+          <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">
+            Total pot
+          </p>
+          {startingPot > 0 ? (
+            <>
+              <p className="text-4xl font-bold text-slate-100 tabular-nums">
+                ${(startingPot + surgeTotal).toLocaleString()}
+              </p>
+              <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
+                <span className="text-slate-400 tabular-nums">
+                  ${startingPot.toLocaleString()}
+                </span>
+                {" starting pot"}
+                {surgeTotal > 0 && (
+                  <>
+                    {" + "}
+                    <span className="text-slate-400 tabular-nums">
+                      ${surgeTotal.toLocaleString()}
+                    </span>
+                    {" in surges"}
+                  </>
+                )}
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-4xl font-bold text-slate-100 tabular-nums">
+                ${surgeTotal.toLocaleString()}
+              </p>
+              <p className="text-xs text-slate-600 mt-1.5">
+                {weekEntries.length} week{weekEntries.length !== 1 ? "s" : ""}{" "}
+                · ${config?.base_penalty ?? 25} base penalty
+              </p>
+            </>
+          )}
+        </div>
 
-        {/* ── Payouts CTA (season complete) ── */}
+        {/* ── Season payouts CTA ── */}
         {league?.status === "complete" && (
           <Link
             href={`/league/${leagueId}/payouts`}
-            className="flex items-center gap-3 bg-[#111120] border border-[#1c1c30] hover:border-yellow-500/40 hover:bg-[#18182a] active:scale-[0.98] rounded-2xl px-4 py-4 transition-all group"
+            className="group flex items-center gap-3 bg-navy-800 border border-navy-700 hover:border-amber-500/30 hover:bg-navy-750 rounded-xl px-4 py-3.5 transition-all"
           >
-            <div className="bg-yellow-500/15 rounded-xl p-2.5 flex-shrink-0">
-              <Trophy className="w-5 h-5 text-yellow-400" />
+            <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center flex-shrink-0">
+              <Trophy className="w-4 h-4 text-amber-400" strokeWidth={1.5} />
             </div>
             <div className="flex-1">
-              <p className="font-semibold text-white text-sm">Season complete — view payouts</p>
-              <p className="text-xs text-slate-500 mt-0.5">See exactly who owes the champion</p>
+              <p className="text-sm font-medium text-slate-200">Season complete</p>
+              <p className="text-xs text-slate-600 mt-0.5">View final payouts</p>
             </div>
-            <ChevronRight className="w-4 h-4 text-slate-700 group-hover:text-yellow-400 transition-colors" />
+            <ChevronRight
+              className="w-4 h-4 text-slate-700 group-hover:text-slate-400 transition-colors"
+              strokeWidth={1.5}
+            />
           </Link>
         )}
 
         {/* ── Tax standings ── */}
         <section>
-          <h2 className="text-xs font-semibold text-slate-600 uppercase tracking-widest mb-3 px-1">
+          <p className="text-xs font-medium text-slate-600 uppercase tracking-wider mb-2 px-1">
             Tax standings
-          </h2>
-          <div className="bg-[#111120] border border-[#1c1c30] rounded-2xl overflow-hidden divide-y divide-[#1c1c30]">
-            {teamTaxes.length === 0 ? (
-              <p className="px-4 py-8 text-center text-slate-600 text-sm">
+          </p>
+          <div className="bg-navy-800 border border-navy-700 rounded-xl overflow-hidden divide-y divide-navy-700">
+            {seasonRecords.length === 0 ? (
+              <p className="px-4 py-8 text-center text-sm text-slate-600">
                 No matchup data yet
               </p>
             ) : (
-              teamTaxes.map(({ info, owed, weeks }) => (
-                <div key={info.rosterId} className="flex items-center gap-3 px-4 py-3.5">
-                  <Avatar src={avatarUrl(info.avatar)} name={info.displayName} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-white leading-snug truncate">
-                      {info.teamName}
-                    </p>
-                    <p className="text-xs text-slate-600 truncate">{info.displayName}</p>
-                  </div>
-                  <div className="flex-shrink-0 text-right">
-                    {owed > 0 ? (
-                      <>
-                        <p className="text-sm font-bold text-red-400">−${owed}</p>
-                        <p className="text-[10px] text-slate-700 mt-0.5">
-                          Wk {weeks.join(", ")}
+              seasonRecords.map(({ team, totalOwed, weekBreakdown }) => {
+                const info = teamById(team.id);
+                return (
+                  <div key={team.id} className="flex items-center gap-3 px-4 py-3.5">
+                    <Avatar src={avatarUrl(info?.avatar)} name={team.name} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-slate-100 truncate">
+                        {team.name}
+                      </p>
+                      {info && (
+                        <p className="text-xs text-slate-600 truncate">
+                          {info.displayName}
                         </p>
-                      </>
-                    ) : (
-                      <p className="text-sm font-semibold text-slate-600">$0</p>
-                    )}
+                      )}
+                    </div>
+                    <div className="flex-shrink-0 text-right">
+                      {totalOwed > 0 ? (
+                        <>
+                          <p className="text-sm font-semibold text-red-400 tabular-nums">
+                            −${totalOwed}
+                          </p>
+                          <p className="text-[10px] text-slate-700 mt-0.5 tabular-nums">
+                            Wk{" "}
+                            {[...new Set(weekBreakdown.map((w) => w.week))].join(", ")}
+                          </p>
+                        </>
+                      ) : (
+                        <p className="text-sm text-slate-600">—</p>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </section>
 
         {/* ── Weekly recap ── */}
-        {weekResults.length > 0 && (
+        {weekEntries.length > 0 && adaptedLeague && (
           <section>
-            <h2 className="text-xs font-semibold text-slate-600 uppercase tracking-widest mb-3 px-1">
+            <p className="text-xs font-medium text-slate-600 uppercase tracking-wider mb-2 px-1">
               Weekly recap
-            </h2>
-            <div className="bg-[#111120] border border-[#1c1c30] rounded-2xl overflow-hidden divide-y divide-[#1c1c30]">
-              {weekResults.map(({ week, lowestRosterId, lowestPts }) => {
-                const team = teams.get(lowestRosterId);
+            </p>
+            <div className="bg-navy-800 border border-navy-700 rounded-xl overflow-hidden divide-y divide-navy-700">
+              {weekEntries.map((entry) => {
+                const lowestTeam  = teamById(entry.lowestScorerTeamId);
+                const pts         = weekLowPts.get(entry.week);
+                const charges     = calculateWeekTaxes(entry, adaptedLeague);
+                const weekTotal   = charges.reduce((s, c) => s + c.amount, 0);
+
+                // Milestones that triggered this week
+                const milestonesFired = (config?.milestones ?? [])
+                  .map((rule, i) => ({
+                    rule,
+                    qualifiers: entry.milestoneResults[i]?.qualifyingTeamIds ?? [],
+                  }))
+                  .filter((m) => m.qualifiers.length > 0);
+
                 return (
-                  <div key={week} className="flex items-center gap-3 px-4 py-3">
-                    {/* Week chip */}
-                    <div className="w-9 h-9 rounded-lg bg-[#1c1c30] flex flex-col items-center justify-center flex-shrink-0">
-                      <span className="text-[9px] font-bold text-slate-600 uppercase leading-none">WK</span>
-                      <span className="text-sm font-black text-slate-400 leading-tight">{week}</span>
+                  <div key={entry.week} className="px-4 py-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-navy-700 flex flex-col items-center justify-center flex-shrink-0">
+                        <span className="text-[9px] font-semibold text-slate-600 uppercase leading-none">
+                          Wk
+                        </span>
+                        <span className="text-sm font-bold text-slate-400 tabular-nums leading-tight">
+                          {entry.week}
+                        </span>
+                      </div>
+                      <Avatar
+                        src={avatarUrl(lowestTeam?.avatar)}
+                        name={lowestTeam?.teamName ?? "?"}
+                        size="sm"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-slate-200 truncate">
+                          {lowestTeam?.teamName ?? `Roster ${entry.lowestScorerTeamId}`}
+                        </p>
+                        <p className="text-xs text-slate-600 tabular-nums">
+                          {pts != null ? `${pts.toFixed(2)} pts · ` : ""}lowest scorer
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        <TrendingDown className="w-3.5 h-3.5 text-red-400" strokeWidth={1.5} />
+                        <span className="text-sm font-semibold text-red-400 tabular-nums">
+                          ${weekTotal}
+                        </span>
+                      </div>
                     </div>
 
-                    {/* Avatar + name */}
-                    <Avatar src={avatarUrl(team?.avatar)} name={team?.teamName ?? "?"} size="sm" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-white truncate">
-                        {team?.teamName ?? `Roster ${lowestRosterId}`}
-                      </p>
-                      <p className="text-xs text-slate-600">
-                        {lowestPts.toFixed(2)} pts · lowest scorer
-                      </p>
-                    </div>
-
-                    {/* Tax badge */}
-                    <div className="flex items-center gap-1 bg-red-500/10 border border-red-500/20 rounded-lg px-2 py-1 flex-shrink-0">
-                      <TrendingDown className="w-3 h-3 text-red-400" />
-                      <span className="text-red-400 text-xs font-bold">$25</span>
-                    </div>
+                    {/* Milestone callouts */}
+                    {milestonesFired.length > 0 && (
+                      <div className="mt-2 ml-11 space-y-1">
+                        {milestonesFired.map(({ rule, qualifiers }, i) => (
+                          <p key={i} className="text-[11px] text-emerald-500/70 leading-snug">
+                            ⚡{" "}
+                            {rule.type === "points"
+                              ? `${rule.threshold}+ pts`
+                              : `${rule.threshold}+ TDs`}
+                            {" — "}
+                            {qualifiers
+                              .map((id) => teamById(id)?.teamName ?? `Roster ${id}`)
+                              .join(", ")}
+                            {" qualified"}
+                          </p>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 );
               })}

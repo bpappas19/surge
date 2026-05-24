@@ -135,6 +135,40 @@ export async function getWinnersBracket(
   return data ?? [];
 }
 
+// ─── Player stats ──────────────────────────────────────────────────────────
+
+export interface SleeperPlayerStats {
+  rush_td?: number;
+  rec_td?: number;
+  pass_td?: number;
+  fum_ret_td?: number;
+  def_td?: number;
+  [key: string]: number | undefined;
+}
+
+/** Returns all NFL player stats for one regular-season week, keyed by player_id. */
+export async function getWeekPlayerStats(
+  season: string,
+  week: number
+): Promise<Record<string, SleeperPlayerStats>> {
+  const data = await apiFetch<Record<string, SleeperPlayerStats> | null>(
+    `/stats/nfl/regular/${season}/${week}`
+  );
+  return data ?? {};
+}
+
+/** Sums all touchdown-type stats for a single player's week. */
+export function countPlayerTDs(stats: SleeperPlayerStats | undefined): number {
+  if (!stats) return 0;
+  return (
+    (stats.rush_td ?? 0) +
+    (stats.rec_td ?? 0) +
+    (stats.pass_td ?? 0) +
+    (stats.fum_ret_td ?? 0) +
+    (stats.def_td ?? 0)
+  );
+}
+
 // ─── Derived helpers ───────────────────────────────────────────────────────
 
 /** Returns the roster_id of the champion from the winners bracket, or null. */

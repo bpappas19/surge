@@ -9,14 +9,16 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        surge: {
-          bg: "#080810",
-          surface: "#0f0f1a",
-          card: "#111120",
-          border: "#1c1c30",
-          green: "#22c55e",
-          "green-muted": "#16a34a",
-          "green-glow": "#4ade80",
+        // Dark navy palette — Sleeper-inspired
+        navy: {
+          950: "#090d18",
+          900: "#0d1525",
+          850: "#101a2b",
+          800: "#111e32",
+          750: "#152233",
+          700: "#1a2d47",
+          600: "#233a5c",
+          500: "#2d4a73",
         },
       },
       animation: {
