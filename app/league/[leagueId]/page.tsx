@@ -377,7 +377,7 @@ export default function LeagueDashboard() {
     <main className="min-h-screen bg-navy-950 pb-12">
 
       {/* Inline page header */}
-      <div className="w-full max-w-2xl mx-auto px-4 pt-5 pb-2 flex items-center gap-3">
+      <div className="w-full max-w-2xl mx-auto px-4 pt-5 pb-4 flex items-center gap-3 border-b border-navy-700/50">
         <button
           onClick={() => router.back()}
           className="text-slate-500 hover:text-slate-300 transition-colors p-1 -ml-1 flex-shrink-0"
@@ -420,16 +420,16 @@ export default function LeagueDashboard() {
         )}
       </div>
 
-      <div className="w-full max-w-2xl mx-auto px-4 space-y-4">
+      <div className="w-full max-w-2xl mx-auto px-4 space-y-4 mt-1">
 
         {/* ── Pot total ── */}
-        <div className="bg-navy-800 border border-navy-700 rounded-xl p-5">
-          <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">
+        <div className="bg-emerald-500/5 border border-emerald-500/15 rounded-xl p-5">
+          <p className="text-xs font-medium text-slate-500 mb-1">
             Total pot
           </p>
           {startingPot > 0 ? (
             <>
-              <p className="text-4xl font-bold text-slate-100 tabular-nums">
+              <p className="text-5xl font-bold text-slate-100 tabular-nums">
                 ${(startingPot + surgeTotal).toLocaleString()}
               </p>
               <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
@@ -450,7 +450,7 @@ export default function LeagueDashboard() {
             </>
           ) : (
             <>
-              <p className="text-4xl font-bold text-slate-100 tabular-nums">
+              <p className="text-5xl font-bold text-slate-100 tabular-nums">
                 ${surgeTotal.toLocaleString()}
               </p>
               <p className="text-xs text-slate-600 mt-1.5">
@@ -465,7 +465,7 @@ export default function LeagueDashboard() {
         {league?.status === "complete" && (
           <Link
             href={`/league/${leagueId}/payouts`}
-            className="group flex items-center gap-3 bg-navy-800 border border-navy-700 hover:border-amber-500/30 hover:bg-navy-750 rounded-xl px-4 py-3.5 transition-all"
+            className="group flex items-center gap-3 bg-amber-500/8 border border-amber-500/20 hover:border-amber-500/35 hover:bg-amber-500/12 rounded-xl px-4 py-3.5 transition-all"
           >
             <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center flex-shrink-0">
               <Trophy className="w-4 h-4 text-amber-400" strokeWidth={1.5} />
@@ -483,7 +483,7 @@ export default function LeagueDashboard() {
 
         {/* ── Tax standings ── */}
         <section>
-          <p className="text-xs font-medium text-slate-600 uppercase tracking-wider mb-2 px-1">
+          <p className="text-xs font-medium text-slate-600 mb-2 px-1">
             Tax standings
           </p>
           <div className="bg-navy-800 border border-navy-700 rounded-xl overflow-hidden divide-y divide-navy-700">
@@ -495,7 +495,7 @@ export default function LeagueDashboard() {
               seasonRecords.map(({ team, totalOwed, weekBreakdown }) => {
                 const info = teamById(team.id);
                 return (
-                  <div key={team.id} className="flex items-center gap-3 px-4 py-3.5">
+                  <div key={team.id} className="flex items-center gap-3 px-4 py-4">
                     <Avatar src={avatarUrl(info?.avatar)} name={team.name} />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-slate-100 truncate">
@@ -510,7 +510,7 @@ export default function LeagueDashboard() {
                     <div className="flex-shrink-0 text-right">
                       {totalOwed > 0 ? (
                         <>
-                          <p className="text-sm font-semibold text-red-400 tabular-nums">
+                          <p className="text-sm font-bold text-red-400 tabular-nums">
                             −${totalOwed}
                           </p>
                           <p className="text-[10px] text-slate-700 mt-0.5 tabular-nums">
@@ -532,7 +532,7 @@ export default function LeagueDashboard() {
         {/* ── Weekly recap ── */}
         {weekEntries.length > 0 && adaptedLeague && (
           <section>
-            <p className="text-xs font-medium text-slate-600 uppercase tracking-wider mb-2 px-1">
+            <p className="text-xs font-medium text-slate-600 mb-2 px-1">
               Weekly recap
             </p>
             <div className="bg-navy-800 border border-navy-700 rounded-xl overflow-hidden divide-y divide-navy-700">

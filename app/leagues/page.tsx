@@ -126,11 +126,21 @@ function LeagueCardView({ card }: { card: LeagueCard }) {
       : `/m/${row.id}`;
 
   return (
-    <div className="bg-navy-800 border border-navy-700 rounded-2xl overflow-hidden hover:border-navy-600 transition-colors group">
+    <div
+      className={`bg-navy-800 border rounded-2xl overflow-hidden transition-colors group ${
+        isCommissioner
+          ? "border-navy-700 border-l-2 border-l-emerald-500/40 hover:border-l-emerald-500/60"
+          : "border-navy-700 hover:border-navy-600"
+      }`}
+    >
 
-      {/* Top: name + badges */}
-      <div className="px-5 pt-5 pb-4">
-        <div className="flex items-start justify-between gap-3 mb-3">
+      {/* Pot area — subtle gradient background */}
+      <div
+        className="px-5 pt-5 pb-4"
+        style={{ background: "linear-gradient(160deg, rgba(9,13,24,0.55) 0%, rgba(17,30,50,0) 100%)" }}
+      >
+        {/* Name + badges row */}
+        <div className="flex items-start justify-between gap-3 mb-4">
           <div className="flex items-center gap-2.5 flex-wrap min-w-0">
             <h2 className="text-base font-bold text-slate-100 leading-tight truncate">
               {row.name}
@@ -147,19 +157,17 @@ function LeagueCardView({ card }: { card: LeagueCard }) {
         </div>
 
         {/* Giant pot number */}
-        <div className="mb-1">
-          <p className="text-[11px] font-medium text-slate-600 uppercase tracking-wider mb-0.5">
-            Current pot
-          </p>
-          <p className="text-4xl font-bold text-emerald-400 tabular-nums leading-none">
-            ${pot.toLocaleString()}
-          </p>
-        </div>
+        <p className="text-[11px] font-medium text-slate-500 mb-0.5">
+          Current pot
+        </p>
+        <p className="text-4xl font-bold text-emerald-400 tabular-nums leading-none">
+          ${pot.toLocaleString()}
+        </p>
 
-        {/* Could reach */}
+        {/* Could reach — prominent amber headline */}
         {remaining > 0 && maxPot > pot && (
-          <p className="text-xs text-amber-500/70 mt-1.5 tabular-nums">
-            Could reach ${maxPot.toLocaleString()} if all milestones hit
+          <p className="text-lg font-semibold text-amber-400/75 mt-2 tabular-nums leading-snug">
+            Could reach ${maxPot.toLocaleString()}
           </p>
         )}
       </div>
@@ -167,13 +175,16 @@ function LeagueCardView({ card }: { card: LeagueCard }) {
       {/* Progress bar */}
       {maxPot > startingPot && (
         <div className="px-5 pb-4">
-          <div className="h-1 bg-navy-700 rounded-full overflow-hidden">
+          <div className="h-[6px] bg-navy-700 rounded-full overflow-hidden">
             <div
-              className="h-full bg-emerald-500/60 rounded-full transition-all duration-500"
-              style={{ width: `${progress}%` }}
+              className="h-full bg-emerald-500/70 rounded-full transition-all duration-500"
+              style={{
+                width: `${progress}%`,
+                boxShadow: progress > 0 ? "0 0 8px rgba(16, 185, 129, 0.45)" : undefined,
+              }}
             />
           </div>
-          <div className="flex justify-between mt-1">
+          <div className="flex justify-between mt-1.5">
             <span className="text-[10px] text-slate-700 tabular-nums">
               ${startingPot.toLocaleString()} start
             </span>
@@ -190,13 +201,13 @@ function LeagueCardView({ card }: { card: LeagueCard }) {
       {/* Position / debt */}
       <div className="px-5 py-3.5 flex items-center justify-between gap-4">
         <div>
-          <p className="text-[10px] text-slate-600 uppercase tracking-wider mb-0.5">
+          <p className="text-[10px] text-slate-600 mb-0.5">
             Your position
           </p>
           <p className="text-xs font-medium text-slate-400">
             {isCommissioner ? "Commissioner" : "Member"}
             {!isCommissioner && debt > 0 && (
-              <span className="ml-2 text-red-400 tabular-nums font-semibold">
+              <span className="ml-2 text-red-400 tabular-nums font-bold">
                 −${debt} owed
               </span>
             )}
@@ -206,7 +217,7 @@ function LeagueCardView({ card }: { card: LeagueCard }) {
           </p>
         </div>
         <div className="text-right">
-          <p className="text-[10px] text-slate-600 uppercase tracking-wider mb-0.5">
+          <p className="text-[10px] text-slate-600 mb-0.5">
             Season
           </p>
           <p className="text-xs text-slate-500 tabular-nums">
@@ -215,18 +226,18 @@ function LeagueCardView({ card }: { card: LeagueCard }) {
         </div>
       </div>
 
-      {/* CTA */}
+      {/* CTA — solid emerald */}
       <div className="px-5 pb-5">
         <Link
           href={dashboardHref}
-          className="w-full flex items-center justify-between bg-navy-700 hover:bg-navy-600 border border-navy-600 hover:border-navy-500 rounded-xl px-4 py-3 transition-colors group/btn"
+          className="w-full flex items-center justify-between bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 rounded-xl px-4 py-3 transition-colors group/btn"
         >
-          <span className="text-sm font-medium text-slate-200">
+          <span className="text-sm font-semibold text-white">
             View league
           </span>
           <ChevronRight
-            className="w-4 h-4 text-slate-500 group-hover/btn:text-slate-300 transition-colors"
-            strokeWidth={1.5}
+            className="w-4 h-4 text-white/70 group-hover/btn:text-white transition-colors"
+            strokeWidth={1.75}
           />
         </Link>
       </div>
@@ -333,7 +344,7 @@ export default function LeaguesPage() {
 
   return (
     <main className="min-h-screen bg-navy-950 pb-16">
-      <div className="w-full max-w-2xl mx-auto px-4 pt-8 pb-4">
+      <div className="w-full max-w-2xl mx-auto px-4 pt-5 pb-3">
         <h1 className="text-2xl font-bold text-slate-100 tracking-tight">
           Your leagues
         </h1>

@@ -165,7 +165,7 @@ export default function ManualDashboard() {
   return (
     <main className="min-h-screen bg-navy-950 pb-12">
       {/* Inline page header */}
-      <div className="w-full max-w-2xl mx-auto px-4 pt-5 pb-2 flex items-center gap-3">
+      <div className="w-full max-w-2xl mx-auto px-4 pt-5 pb-4 flex items-center gap-3 border-b border-navy-700/50">
         <button
           onClick={() => router.push("/")}
           className="text-slate-500 hover:text-slate-300 transition-colors p-1 -ml-1 flex-shrink-0"
@@ -200,16 +200,16 @@ export default function ManualDashboard() {
         )}
       </div>
 
-      <div className="w-full max-w-2xl mx-auto px-4 space-y-4">
+      <div className="w-full max-w-2xl mx-auto px-4 space-y-4 mt-1">
 
         {/* ── Pot total ── */}
-        <div className="bg-navy-800 border border-navy-700 rounded-xl p-5">
-          <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">
+        <div className="bg-emerald-500/5 border border-emerald-500/15 rounded-xl p-5">
+          <p className="text-xs font-medium text-slate-500 mb-1">
             Total pot
           </p>
           {league.config.buyIn ? (
             <>
-              <p className="text-4xl font-bold text-slate-100 tabular-nums">
+              <p className="text-5xl font-bold text-slate-100 tabular-nums">
                 ${((league.config.buyIn * league.teams.length) + pot).toLocaleString()}
               </p>
               <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
@@ -228,7 +228,7 @@ export default function ManualDashboard() {
             </>
           ) : (
             <>
-              <p className="text-4xl font-bold text-slate-100 tabular-nums">${pot}</p>
+              <p className="text-5xl font-bold text-slate-100 tabular-nums">${pot}</p>
               <p className="text-xs text-slate-600 mt-1.5">
                 {entries.length} week{entries.length !== 1 ? "s" : ""} · $
                 {league.config.basePenalty} base penalty
@@ -335,7 +335,7 @@ export default function ManualDashboard() {
 
         {/* ── Tax standings ── */}
         <section>
-          <p className="text-xs font-medium text-slate-600 uppercase tracking-wider mb-2 px-1">
+          <p className="text-xs font-medium text-slate-600 mb-2 px-1">
             Tax standings
           </p>
           <div className="bg-navy-800 border border-navy-700 rounded-xl overflow-hidden divide-y divide-navy-700">
@@ -350,7 +350,7 @@ export default function ManualDashboard() {
                 return (
                   <div
                     key={team.id}
-                    className={`flex items-center gap-3 px-4 py-3.5 ${
+                    className={`flex items-center gap-3 px-4 py-4 ${
                       isMyTeam ? "bg-teal-500/5 border-l-2 border-l-teal-500/30" : ""
                     }`}
                   >
@@ -391,7 +391,7 @@ export default function ManualDashboard() {
                     </div>
                     <div className="flex-shrink-0 text-right">
                       {totalOwed > 0 ? (
-                        <p className="text-sm font-semibold text-red-400 tabular-nums">
+                        <p className="text-sm font-bold text-red-400 tabular-nums">
                           −${totalOwed}
                         </p>
                       ) : (
@@ -408,7 +408,7 @@ export default function ManualDashboard() {
         {/* ── Weekly history ── */}
         {entries.length > 0 && (
           <section>
-            <p className="text-xs font-medium text-slate-600 uppercase tracking-wider mb-2 px-1">
+            <p className="text-xs font-medium text-slate-600 mb-2 px-1">
               Weekly history
             </p>
             <div className="bg-navy-800 border border-navy-700 rounded-xl overflow-hidden divide-y divide-navy-700">
