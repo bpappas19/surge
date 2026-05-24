@@ -25,6 +25,7 @@ import {
   Copy,
   CheckCircle2,
   Link2,
+  Settings,
 } from "lucide-react";
 
 // ─── Shared ───────────────────────────────────────────────────────────────────
@@ -172,7 +173,14 @@ export default function ManualDashboard() {
           <ChevronLeft className="w-5 h-5" strokeWidth={1.5} />
         </button>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-slate-100 truncate">{league.name}</p>
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-sm font-semibold text-slate-100 truncate">{league.name}</p>
+            {isCommissioner && (
+              <span className="flex-shrink-0 text-[10px] font-semibold uppercase tracking-wide bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 rounded px-1.5 py-0.5">
+                Commissioner
+              </span>
+            )}
+          </div>
           <p className="text-xs text-slate-600">{league.teams.length} teams</p>
         </div>
         {isCommissioner && inviteUrl && (
@@ -180,6 +188,15 @@ export default function ManualDashboard() {
             <Link2 className="w-3.5 h-3.5 text-slate-600 flex-shrink-0" strokeWidth={1.5} />
             <CopyButton text={inviteUrl} />
           </div>
+        )}
+        {isCommissioner && (
+          <Link
+            href={`/m/${leagueId}/settings`}
+            className="text-slate-600 hover:text-slate-300 transition-colors p-1 flex-shrink-0"
+            title="Edit league settings"
+          >
+            <Settings className="w-4 h-4" strokeWidth={1.5} />
+          </Link>
         )}
       </div>
 

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Logo from "@/components/Logo";
 import { useAuth } from "@/contexts/AuthContext";
-import { LogOut } from "lucide-react";
+import { LogOut, LayoutGrid } from "lucide-react";
 
 export function NavBar() {
   const { user, loading, signOut } = useAuth();
@@ -53,6 +53,16 @@ export function NavBar() {
         <div className="flex items-center gap-3">
           {!loading && (
             user ? (
+              <>
+                {/* My Leagues icon link */}
+                <Link
+                  href="/leagues"
+                  className="text-slate-500 hover:text-slate-200 transition-colors p-1"
+                  aria-label="My Leagues"
+                >
+                  <LayoutGrid className="w-4 h-4" strokeWidth={1.5} />
+                </Link>
+
               <div ref={menuRef} className="relative">
                 {/* User avatar button */}
                 <button
@@ -82,6 +92,7 @@ export function NavBar() {
                   </div>
                 )}
               </div>
+              </>
             ) : (
               <div className="flex items-center gap-3">
                 <Link

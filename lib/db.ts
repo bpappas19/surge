@@ -84,11 +84,19 @@ export async function getLeagueBySleeperLeagueId(
 export async function updateLeague(
   db: DB,
   id: string,
-  patch: Partial<Pick<LeagueRow, "champion_team_id" | "base_penalty">>
+  patch: Partial<Pick<LeagueRow, "champion_team_id" | "base_penalty" | "buy_in">> & {
+    milestones?: MilestoneRule[];
+  }
 ): Promise<void> {
+  const { milestones, ...rest } = patch;
+  type LeagueUpdate = Database["public"]["Tables"]["leagues"]["Update"];
+  const update: LeagueUpdate = { ...rest };
+  if (milestones !== undefined) {
+    update.milestones = milestones as LeagueUpdate["milestones"];
+  }
   const { error } = await db
     .from("leagues")
-    .update(patch)
+    .update(update)
     .eq("id", id);
   if (error) console.error("[Surge] updateLeague:", error.message);
 }
