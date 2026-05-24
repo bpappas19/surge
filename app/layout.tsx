@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
-import Link from "next/link";
-import Logo from "@/components/Logo";
+import { AuthProvider } from "@/contexts/AuthContext";
+import { NavBar } from "@/components/NavBar";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"], display: "swap" });
@@ -26,25 +26,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body className={`${inter.className} bg-navy-950 text-slate-100 min-h-screen antialiased`}>
-
-        {/* ── Global nav — fixed, appears on every page ── */}
-        <nav
-          className="fixed top-0 left-0 right-0 z-30 h-14 flex items-center bg-[#0a0e1a] border-b"
-          style={{ borderBottomColor: "rgba(26, 158, 110, 0.45)" }}
-        >
-          <div className="w-full px-4 flex items-center justify-between">
-            <Link href="/" className="flex items-center">
-              <Logo size="sm" />
-            </Link>
-            {/* Right side: reserved for account / settings */}
+        <AuthProvider>
+          {/* Fixed nav — appears on every page */}
+          <NavBar />
+          {/* Spacer so content starts below the 56px nav */}
+          <div className="pt-14">
+            {children}
           </div>
-        </nav>
-
-        {/* Spacer so content starts below the 56px fixed nav */}
-        <div className="pt-14">
-          {children}
-        </div>
-
+        </AuthProvider>
       </body>
     </html>
   );

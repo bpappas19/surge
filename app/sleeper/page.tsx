@@ -4,8 +4,9 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { getUser, getUserLeagues, avatarUrl, SleeperLeague } from "@/lib/sleeper";
-import { getSleeperSettings } from "@/lib/storage";
-import { getLeagueConfig } from "@/lib/supabase";
+import { createClient } from "@/lib/supabase-browser";
+import { useAuth } from "@/contexts/AuthContext";
+import { getLeagueBySleeperLeagueId, getMember } from "@/lib/db";
 import {
   ChevronLeft,
   ChevronRight,
@@ -80,10 +81,13 @@ function LeagueRow({ league, onClick }: { league: SleeperLeague; onClick: () => 
 
 export default function SleeperPage() {
   const router = useRouter();
+  const { user } = useAuth();
+  const [supabase] = useState(() => createClient());
+
   const [username, setUsername] = useState("");
-  const [loading, setLoading]   = useState(false);
-  const [error, setError]       = useState("");
-  const [leagues, setLeagues]   = useState<SleeperLeague[] | null>(null);
+  const [loading,  setLoading]  = useState(false);
+  const [error,    setError]    = useState("");
+  const [leagues,  setLeagues]  = useState<SleeperLeague[] | null>(null);
 
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault();
@@ -95,14 +99,38 @@ export default function SleeperPage() {
     setLeagues(null);
 
     try {
-      const user = await getUser(q);
-      const data = await getUserLeagues(user.user_id, "2025");
+      const sleeperUser = await getUser(q);
+      const data = await getUserLeagues(sleeperUser.user_id, "2025");
       setLeagues(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleLeagueClick(league: SleeperLeague) {
+    // Check if this league exists in our DB
+    const leagueRow = await getLeagueBySleeperLeagueId(supabase, league.league_id).catch(() => null);
+
+    if (!leagueRow) {
+      // No Surge config yet — go to setup
+      router.push(`/league/${league.league_id}/setup`);
+      return;
+    }
+
+    // League exists — check user membership
+    if (user) {
+      const membership = await getMember(supabase, leagueRow.id, user.id).catch(() => null);
+      if (membership) {
+        // Already a member → go to dashboard
+        router.push(`/league/${league.league_id}`);
+        return;
+      }
+    }
+
+    // League exists but user is not a member → invite join flow
+    router.push(`/join/${leagueRow.id}`);
   }
 
   return (
@@ -148,11 +176,11 @@ export default function SleeperPage() {
             <button
               type="submit"
               disabled={loading || !username.trim()}
-              className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-[#ffffff] font-medium rounded-lg py-2.5 text-sm transition-colors"
+              className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium rounded-lg py-2.5 text-sm transition-colors"
             >
               {loading ? (
                 <>
-                  <span className="w-3.5 h-3.5 border-2 border-black/20 border-t-black rounded-full animate-spin" />
+                  <span className="w-3.5 h-3.5 border-2 border-white/20 border-t-white rounded-full animate-spin" />
                   Searching…
                 </>
               ) : (
@@ -185,18 +213,7 @@ export default function SleeperPage() {
                   <LeagueRow
                     key={league.league_id}
                     league={league}
-                    onClick={async () => {
-                    const [supaConfig, local] = await Promise.all([
-                      getLeagueConfig(league.league_id).catch(() => null),
-                      Promise.resolve(getSleeperSettings(league.league_id)),
-                    ]);
-                    const hasConfig = supaConfig !== null || local !== null;
-                    router.push(
-                      hasConfig
-                        ? `/league/${league.league_id}`
-                        : `/league/${league.league_id}/setup`
-                    );
-                  }}
+                    onClick={() => handleLeagueClick(league)}
                   />
                 ))}
               </div>

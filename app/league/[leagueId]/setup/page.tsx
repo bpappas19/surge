@@ -3,8 +3,16 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { getLeague } from "@/lib/sleeper";
+import { getLeagueConfig } from "@/lib/supabase";
 import { getSleeperSettings } from "@/lib/storage";
-import { getLeagueConfig, upsertLeagueConfig } from "@/lib/supabase";
+import { createClient } from "@/lib/supabase-browser";
+import { useAuth } from "@/contexts/AuthContext";
+import {
+  createLeague,
+  addMember,
+  getLeagueBySleeperLeagueId,
+} from "@/lib/db";
+import { StripeConnectCard } from "@/components/StripeConnectCard";
 import type { MilestoneRule } from "@/lib/types";
 import {
   ChevronLeft,
@@ -13,6 +21,8 @@ import {
   TrendingDown,
   Activity,
   AlertCircle,
+  CheckCircle2,
+  Copy,
 } from "lucide-react";
 
 // ─── Design tokens ─────────────────────────────────────────────────────────
@@ -26,20 +36,24 @@ const labelCls = "block text-sm text-slate-400 mb-2";
 
 const primaryBtnCls =
   "w-full flex items-center justify-center gap-2 " +
-  "bg-emerald-500 hover:bg-emerald-400 active:bg-emerald-600 " +
+  "bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 " +
   "disabled:opacity-40 disabled:cursor-not-allowed " +
-  "text-black font-semibold rounded-lg py-3 text-sm transition-colors";
+  "text-white font-semibold rounded-lg py-3 text-sm transition-colors";
 
 // ─── Step dots ─────────────────────────────────────────────────────────────
 
-function StepDots({ step, total = 3 }: { step: number; total?: number }) {
+function StepDots({ step, total = 4 }: { step: number; total?: number }) {
   return (
     <div className="flex items-center gap-1.5">
       {Array.from({ length: total }, (_, i) => (
         <div key={i} className="flex items-center gap-1.5">
           <div
-            className={`w-2 h-2 rounded-full transition-colors duration-200 ${
-              i + 1 <= step ? "bg-teal-400" : "bg-slate-600"
+            className={`rounded-full transition-colors duration-200 ${
+              i + 1 === step
+                ? "w-2.5 h-2.5 bg-teal-400"
+                : i + 1 < step
+                ? "w-2 h-2 bg-teal-400/60"
+                : "w-1.5 h-1.5 bg-slate-600"
             }`}
           />
           {i < total - 1 && (
@@ -52,6 +66,29 @@ function StepDots({ step, total = 3 }: { step: number; total?: number }) {
         </div>
       ))}
     </div>
+  );
+}
+
+// ─── CopyButton ─────────────────────────────────────────────────────────────
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={async () => {
+        await navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }}
+      className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 bg-navy-700 hover:bg-navy-600 rounded-lg transition-colors flex-shrink-0"
+    >
+      {copied ? (
+        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" strokeWidth={1.5} />
+      ) : (
+        <Copy className="w-3.5 h-3.5" strokeWidth={1.5} />
+      )}
+      {copied ? "Copied!" : "Copy"}
+    </button>
   );
 }
 
@@ -207,7 +244,9 @@ function RuleRow({
 export default function SleeperLeagueSetup() {
   const { leagueId } = useParams<{ leagueId: string }>();
   const router = useRouter();
+  const { user } = useAuth();
 
+  const [supabase] = useState(() => createClient());
   const [step, setStep] = useState(1);
   const [leagueName, setLeagueName] = useState("");
   const [teamCount, setTeamCount] = useState(0);
@@ -215,6 +254,10 @@ export default function SleeperLeagueSetup() {
   const [loadingMeta, setLoadingMeta] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+
+  // Step 4 state
+  const [inviteUrl, setInviteUrl] = useState("");
+  const [leagueRowId, setLeagueRowId] = useState("");
 
   // Step 1
   const [buyIn, setBuyIn] = useState("");
@@ -235,7 +278,7 @@ export default function SleeperLeagueSetup() {
   });
 
   useEffect(() => {
-    // Load league metadata from Sleeper
+    // Load Sleeper league metadata
     getLeague(leagueId)
       .then((l) => {
         setLeagueName(l.name);
@@ -244,48 +287,57 @@ export default function SleeperLeagueSetup() {
       })
       .finally(() => setLoadingMeta(false));
 
-    // Pre-fill from Supabase config if it exists, else localStorage
-    getLeagueConfig(leagueId)
-      .then((config) => {
-        if (config) {
-          setBuyIn(String(config.buy_in));
-          setBasePenalty(config.base_penalty);
-          const ptRule = config.milestones.find((m) => m.type === "points");
-          const tdRule = config.milestones.find((m) => m.type === "touchdowns");
-          if (ptRule) {
-            setPointsMilestone({
-              enabled: true,
-              threshold: ptRule.threshold,
-              taxAmount: ptRule.taxPerNonQualifier,
-              exemptIfMultipleQualify: ptRule.exemptIfMultipleQualify,
-            });
-          }
-          if (tdRule) {
-            setTdMilestone({
-              enabled: true,
-              threshold: tdRule.threshold,
-              taxAmount: tdRule.taxPerNonQualifier,
-              exemptIfMultipleQualify: tdRule.exemptIfMultipleQualify,
-            });
-          }
-        } else {
-          // Fall back to legacy localStorage
-          const local = getSleeperSettings(leagueId);
-          if (local) setBuyIn(String(local.buyIn));
+    // Pre-fill: leagues table → legacy Supabase → localStorage
+    getLeagueBySleeperLeagueId(supabase, leagueId)
+      .then((row) => {
+        if (row) {
+          setBuyIn(String(row.buy_in));
+          setBasePenalty(row.base_penalty);
+          const milestones = (row.milestones ?? []) as MilestoneRule[];
+          const ptRule = milestones.find((m) => m.type === "points");
+          const tdRule = milestones.find((m) => m.type === "touchdowns");
+          if (ptRule) setPointsMilestone({ enabled: true, threshold: ptRule.threshold, taxAmount: ptRule.taxPerNonQualifier, exemptIfMultipleQualify: ptRule.exemptIfMultipleQualify });
+          if (tdRule) setTdMilestone({ enabled: true, threshold: tdRule.threshold, taxAmount: tdRule.taxPerNonQualifier, exemptIfMultipleQualify: tdRule.exemptIfMultipleQualify });
+          return;
         }
+        // Legacy fallback
+        return getLeagueConfig(leagueId)
+          .then((config) => {
+            if (config) {
+              setBuyIn(String(config.buy_in));
+              setBasePenalty(config.base_penalty);
+              const ptRule = config.milestones.find((m) => m.type === "points");
+              const tdRule = config.milestones.find((m) => m.type === "touchdowns");
+              if (ptRule) setPointsMilestone({ enabled: true, threshold: ptRule.threshold, taxAmount: ptRule.taxPerNonQualifier, exemptIfMultipleQualify: ptRule.exemptIfMultipleQualify });
+              if (tdRule) setTdMilestone({ enabled: true, threshold: tdRule.threshold, taxAmount: tdRule.taxPerNonQualifier, exemptIfMultipleQualify: tdRule.exemptIfMultipleQualify });
+            } else {
+              const local = getSleeperSettings(leagueId);
+              if (local) setBuyIn(String(local.buyIn));
+            }
+          })
+          .catch(() => {
+            const local = getSleeperSettings(leagueId);
+            if (local) setBuyIn(String(local.buyIn));
+          });
       })
       .catch(() => {
         const local = getSleeperSettings(leagueId);
         if (local) setBuyIn(String(local.buyIn));
       });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [leagueId]);
 
   const buyInNum = Number(buyIn);
   const startingPot = buyInNum > 0 && teamCount > 0 ? buyInNum * teamCount : 0;
 
   async function launch() {
+    if (!user) {
+      router.push(`/auth/login?next=/league/${leagueId}/setup`);
+      return;
+    }
     setSaving(true);
     setSaveError("");
+
     const milestones: MilestoneRule[] = [];
     if (pointsMilestone.enabled) {
       milestones.push({
@@ -303,25 +355,57 @@ export default function SleeperLeagueSetup() {
         exemptIfMultipleQualify: tdMilestone.exemptIfMultipleQualify,
       });
     }
+
     try {
-      await upsertLeagueConfig({
-        league_id: leagueId,
-        season,
-        buy_in: buyInNum,
-        team_count: teamCount,
-        base_penalty: basePenalty,
-        milestones,
-      });
-      router.push(`/league/${leagueId}`);
-    } catch (err) {
-      setSaveError(
-        err instanceof Error ? err.message : "Failed to save config."
+      let leagueRow = await getLeagueBySleeperLeagueId(supabase, leagueId);
+
+      if (leagueRow) {
+        // Update existing row
+        await supabase
+          .from("leagues")
+          .update({
+            buy_in: buyInNum,
+            base_penalty: basePenalty,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            milestones: milestones as any,
+            team_count: teamCount,
+          })
+          .eq("id", leagueRow.id);
+      } else {
+        // Create new league row
+        leagueRow = await createLeague(supabase, {
+          name: leagueName,
+          season,
+          buyIn: buyInNum,
+          teamCount,
+          basePenalty,
+          milestones,
+          mode: "sleeper",
+          sleeperLeagueId: leagueId,
+          commissionerId: user.id,
+        });
+      }
+
+      // Ensure commissioner is a member (upsert is idempotent)
+      await addMember(
+        supabase,
+        leagueRow.id,
+        user.id,
+        "commissioner",
+        (user.user_metadata?.display_name as string | undefined) ?? "Commissioner"
       );
+
+      setLeagueRowId(leagueRow.id);
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? window.location.origin;
+      setInviteUrl(`${appUrl}/join/${leagueRow.id}`);
+      setStep(4);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Failed to save config.");
       setSaving(false);
     }
   }
 
-  const stepLabels = ["League details", "Milestones", "Review"];
+  const stepLabels = ["League details", "Milestones", "Review", "Share"];
 
   if (loadingMeta) {
     return (
@@ -343,20 +427,22 @@ export default function SleeperLeagueSetup() {
 
         {/* Card header */}
         <div className="flex items-center gap-3 px-8 pt-7 pb-5 lg:px-10 lg:pt-9 lg:pb-7 border-b border-navy-700">
-          {step > 1 ? (
+          {step > 1 && step < 4 ? (
             <button
               onClick={() => setStep(step - 1)}
               className="text-slate-500 hover:text-slate-300 transition-colors p-1 -ml-1 flex-shrink-0"
             >
               <ChevronLeft className="w-5 h-5" strokeWidth={1.5} />
             </button>
-          ) : (
+          ) : step === 1 ? (
             <button
               onClick={() => router.back()}
               className="text-slate-500 hover:text-slate-300 transition-colors p-1 -ml-1 flex-shrink-0"
             >
               <ChevronLeft className="w-5 h-5" strokeWidth={1.5} />
             </button>
+          ) : (
+            <div className="w-7 flex-shrink-0" /> /* spacer on step 4 */
           )}
           <div className="flex-1 min-w-0">
             <p className="text-sm lg:text-base font-semibold text-slate-100">
@@ -431,13 +517,8 @@ export default function SleeperLeagueSetup() {
               <div className="bg-navy-800 border border-navy-700 rounded-xl px-5 py-5">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-2.5">
-                    <TrendingDown
-                      className="w-4 h-4 text-slate-500"
-                      strokeWidth={1.5}
-                    />
-                    <p className="text-sm font-medium text-slate-200">
-                      Lowest scorer penalty
-                    </p>
+                    <TrendingDown className="w-4 h-4 text-slate-500" strokeWidth={1.5} />
+                    <p className="text-sm font-medium text-slate-200">Lowest scorer penalty</p>
                   </div>
                   <span className="text-xs text-slate-600">Always active</span>
                 </div>
@@ -499,10 +580,7 @@ export default function SleeperLeagueSetup() {
 
               {saveError && (
                 <div className="flex items-start gap-2.5 bg-red-500/8 border border-red-500/20 rounded-lg px-4 py-3">
-                  <AlertCircle
-                    className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5"
-                    strokeWidth={1.5}
-                  />
+                  <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" strokeWidth={1.5} />
                   <p className="text-red-400 text-sm">{saveError}</p>
                 </div>
               )}
@@ -510,9 +588,7 @@ export default function SleeperLeagueSetup() {
               <div className="bg-navy-800 border border-navy-700 rounded-xl divide-y divide-navy-700">
                 <div className="px-5 py-4">
                   <p className="text-xs text-slate-600 mb-1">League</p>
-                  <p className="text-sm font-semibold text-slate-100">
-                    {leagueName}
-                  </p>
+                  <p className="text-sm font-semibold text-slate-100">{leagueName}</p>
                   <p className="text-xs text-slate-600 mt-0.5">
                     {teamCount} teams · {season} season
                   </p>
@@ -540,11 +616,7 @@ export default function SleeperLeagueSetup() {
                     <RuleRow
                       label={`${pointsMilestone.threshold}+ pts threshold`}
                       value={`$${pointsMilestone.taxAmount} / team`}
-                      sub={
-                        pointsMilestone.exemptIfMultipleQualify
-                          ? "Exemption on"
-                          : "No exemption"
-                      }
+                      sub={pointsMilestone.exemptIfMultipleQualify ? "Exemption on" : "No exemption"}
                     />
                   ) : (
                     <RuleRow label="Points threshold" value="Off" />
@@ -553,11 +625,7 @@ export default function SleeperLeagueSetup() {
                     <RuleRow
                       label={`${tdMilestone.threshold}+ TD threshold`}
                       value={`$${tdMilestone.taxAmount} / team`}
-                      sub={
-                        tdMilestone.exemptIfMultipleQualify
-                          ? "Exemption on"
-                          : "No exemption"
-                      }
+                      sub={tdMilestone.exemptIfMultipleQualify ? "Exemption on" : "No exemption"}
                     />
                   ) : (
                     <RuleRow label="TD threshold" value="Off" />
@@ -574,7 +642,7 @@ export default function SleeperLeagueSetup() {
               >
                 {saving ? (
                   <>
-                    <span className="w-4 h-4 border-2 border-black/20 border-t-black rounded-full animate-spin" />
+                    <span className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
                     Saving…
                   </>
                 ) : (
@@ -583,6 +651,58 @@ export default function SleeperLeagueSetup() {
                     Launch league
                   </>
                 )}
+              </button>
+            </div>
+          )}
+
+          {/* ── Step 4: Share ── */}
+          {step === 4 && (
+            <div className="space-y-5">
+
+              {/* Success indicator */}
+              <div className="flex items-center gap-3 bg-emerald-500/8 border border-emerald-500/20 rounded-xl px-5 py-4">
+                <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0" strokeWidth={1.5} />
+                <div>
+                  <p className="text-sm font-semibold text-slate-100">League configured!</p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Invite your league-mates to join
+                  </p>
+                </div>
+              </div>
+
+              {/* Invite link */}
+              {inviteUrl && (
+                <div className="bg-navy-800 border border-navy-700 rounded-xl px-5 py-4 space-y-3">
+                  <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Invite link</p>
+                  <div className="flex items-center gap-3 bg-navy-900 border border-navy-700 rounded-lg px-3.5 py-2.5">
+                    <p className="text-xs text-slate-400 flex-1 min-w-0 truncate font-mono">
+                      {inviteUrl}
+                    </p>
+                    <CopyButton text={inviteUrl} />
+                  </div>
+                  <p className="text-xs text-slate-700">
+                    Anyone with this link can join and add their payment method.
+                  </p>
+                </div>
+              )}
+
+              {/* Stripe Connect */}
+              {leagueRowId && (
+                <StripeConnectCard
+                  leagueId={leagueRowId}
+                  mode="sleeper"
+                  sleeperId={leagueId}
+                />
+              )}
+
+              {/* Go to dashboard */}
+              <button
+                type="button"
+                onClick={() => router.push(`/league/${leagueId}`)}
+                className={primaryBtnCls}
+              >
+                Go to dashboard
+                <ChevronRight className="w-4 h-4" strokeWidth={1.75} />
               </button>
             </div>
           )}

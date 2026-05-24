@@ -1,9 +1,18 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { Suspense, useEffect, useState, useMemo, useCallback } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { getLeague, getWeekEntries, saveWeekEntry } from "@/lib/storage";
+import { createClient } from "@/lib/supabase-browser";
+import { useAuth } from "@/contexts/AuthContext";
+import {
+  getLeagueById,
+  getMembers,
+  getWeeklyResults,
+  leagueRowToManualLeague,
+  weeklyResultsToEntries,
+  upsertWeeklyResult,
+} from "@/lib/db";
 import { calculateWeekTaxes } from "@/lib/calc";
 import type { ManualLeague, WeekEntry } from "@/lib/types";
 import { ChevronLeft, Check, AlertCircle, ChevronDown, ChevronUp } from "lucide-react";
@@ -50,73 +59,92 @@ function TeamCheckbox({
   );
 }
 
-// ─── Page ─────────────────────────────────────────────────────────────────────
+// ─── Inner form (uses useSearchParams — must be inside <Suspense>) ────────────
 
-export default function WeekForm() {
+function WeekFormInner() {
   const { leagueId } = useParams<{ leagueId: string }>();
   const router       = useRouter();
   const searchParams = useSearchParams();
+  const { user }     = useAuth();
   const editWeek     = searchParams.get("week") ? Number(searchParams.get("week")) : null;
 
-  const [league, setLeague] = useState<ManualLeague | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [supabase] = useState(() => createClient());
+  const [league,   setLeague]  = useState<ManualLeague | null>(null);
+  const [loading,  setLoading] = useState(true);
+  const [saving,   setSaving]  = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   // Form state
-  const [weekNumber, setWeekNumber]         = useState<number>(1);
-  const [lowestScorer, setLowestScorer]     = useState<string>("");
-  const [milestoneSelections, setMilestoneSelections] = useState<string[][]>([]);
+  const [weekNumber,           setWeekNumber]           = useState<number>(1);
+  const [lowestScorer,         setLowestScorer]         = useState<string>("");
+  const [milestoneSelections,  setMilestoneSelections]  = useState<string[][]>([]);
 
   useEffect(() => {
-    const l = getLeague(leagueId);
-    if (!l) { setLoading(false); return; }
+    async function load() {
+      const row = await getLeagueById(supabase, leagueId);
+      if (!row) { setLoading(false); return; }
 
-    const entries = getWeekEntries(leagueId);
-    const defaultWeek = editWeek ?? (entries[entries.length - 1]?.week ?? 0) + 1;
+      const [members, weekRows] = await Promise.all([
+        getMembers(supabase, leagueId),
+        getWeeklyResults(supabase, leagueId),
+      ]);
 
-    setLeague(l);
-    setWeekNumber(defaultWeek);
-    setMilestoneSelections(l.config.milestones.map(() => []));
-
-    // If editing an existing entry, pre-fill
-    if (editWeek) {
-      const existing = entries.find((e) => e.week === editWeek);
-      if (existing) {
-        setLowestScorer(existing.lowestScorerTeamId);
-        setMilestoneSelections(
-          l.config.milestones.map((_, i) => existing.milestoneResults[i]?.qualifyingTeamIds ?? [])
-        );
+      // Commissioner check — redirect members
+      if (user) {
+        const myMember = members.find((m) => m.user_id === user.id);
+        if (!myMember || myMember.role !== "commissioner") {
+          router.replace(`/m/${leagueId}`);
+          return;
+        }
       }
+
+      const manualLeague = leagueRowToManualLeague(row, members);
+      const entries      = weeklyResultsToEntries(weekRows, leagueId);
+      const defaultWeek  = editWeek ?? (entries[entries.length - 1]?.week ?? 0) + 1;
+
+      setLeague(manualLeague);
+      setWeekNumber(defaultWeek);
+      setMilestoneSelections(manualLeague.config.milestones.map(() => []));
+
+      // Pre-fill when editing
+      if (editWeek) {
+        const existing = entries.find((e) => e.week === editWeek);
+        if (existing) {
+          setLowestScorer(existing.lowestScorerTeamId);
+          setMilestoneSelections(
+            manualLeague.config.milestones.map((_, i) =>
+              existing.milestoneResults[i]?.qualifyingTeamIds ?? []
+            )
+          );
+        }
+      }
+
+      setLoading(false);
     }
+    load();
+  }, [supabase, leagueId, editWeek, user, router]);
 
-    setLoading(false);
-  }, [leagueId, editWeek]);
-
-  // Toggle a team in a milestone's qualifier list
   const toggleMilestoneTeam = useCallback(
     (milestoneIdx: number, teamId: string) => {
-      setMilestoneSelections((prev) => {
-        const next = prev.map((sel, i) => {
+      setMilestoneSelections((prev) =>
+        prev.map((sel, i) => {
           if (i !== milestoneIdx) return sel;
           return sel.includes(teamId)
             ? sel.filter((id) => id !== teamId)
             : [...sel, teamId];
-        });
-        return next;
-      });
+        })
+      );
     },
     []
   );
 
-  // Live preview — recomputes whenever form changes
   const preview = useMemo(() => {
     if (!league || !lowestScorer) return null;
     const entry: WeekEntry = {
       leagueId,
       week: weekNumber,
       lowestScorerTeamId: lowestScorer,
-      milestoneResults: milestoneSelections.map((sel) => ({
-        qualifyingTeamIds: sel,
-      })),
+      milestoneResults: milestoneSelections.map((sel) => ({ qualifyingTeamIds: sel })),
       submittedAt: new Date().toISOString(),
     };
     return calculateWeekTaxes(entry, league);
@@ -124,19 +152,31 @@ export default function WeekForm() {
 
   const previewTotal = preview?.reduce((s, c) => s + c.amount, 0) ?? 0;
 
-  function submit() {
+  async function submit() {
     if (!league || !lowestScorer) return;
-    const entry: WeekEntry = {
-      leagueId,
-      week: weekNumber,
-      lowestScorerTeamId: lowestScorer,
-      milestoneResults: milestoneSelections.map((sel) => ({
-        qualifyingTeamIds: sel,
-      })),
-      submittedAt: new Date().toISOString(),
-    };
-    saveWeekEntry(entry);
-    router.push(`/m/${leagueId}`);
+    setSaving(true);
+    setSaveError("");
+    try {
+      const entry: WeekEntry = {
+        leagueId,
+        week: weekNumber,
+        lowestScorerTeamId: lowestScorer,
+        milestoneResults: milestoneSelections.map((sel) => ({ qualifyingTeamIds: sel })),
+        submittedAt: new Date().toISOString(),
+      };
+      const taxes = calculateWeekTaxes(entry, league);
+      await upsertWeeklyResult(supabase, {
+        leagueId,
+        week: weekNumber,
+        lowestScorerTeam: lowestScorer,
+        milestoneHits: milestoneSelections,
+        taxes,
+      });
+      router.push(`/m/${leagueId}`);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Failed to save results.");
+      setSaving(false);
+    }
   }
 
   // ── Loading / not found ────────────────────────────────────────────────────
@@ -159,8 +199,6 @@ export default function WeekForm() {
       </div>
     );
   }
-
-  const hasActiveMilestones = league.config.milestones.length > 0;
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -304,7 +342,15 @@ export default function WeekForm() {
           </div>
         )}
 
-        {/* ── Submit ── */}
+        {/* ── Save error ── */}
+        {saveError && (
+          <div className="flex items-start gap-2.5 bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-3">
+            <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" strokeWidth={1.5} />
+            <p className="text-sm text-red-400">{saveError}</p>
+          </div>
+        )}
+
+        {/* ── Select prompt ── */}
         {!lowestScorer && (
           <div className="flex items-start gap-2.5 bg-navy-800 border border-navy-700 rounded-lg px-4 py-3">
             <AlertCircle className="w-4 h-4 text-slate-600 flex-shrink-0 mt-0.5" strokeWidth={1.5} />
@@ -315,13 +361,36 @@ export default function WeekForm() {
         <button
           type="button"
           onClick={submit}
-          disabled={!lowestScorer}
-          className="w-full bg-emerald-500 hover:bg-emerald-400 active:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed text-black font-semibold rounded-lg py-2.5 text-sm transition-colors"
+          disabled={!lowestScorer || saving}
+          className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold rounded-lg py-2.5 text-sm transition-colors"
         >
-          {editWeek ? `Update week ${editWeek}` : `Submit week ${weekNumber}`}
+          {saving ? (
+            <>
+              <span className="w-3.5 h-3.5 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+              Saving…
+            </>
+          ) : (
+            editWeek ? `Update week ${editWeek}` : `Submit week ${weekNumber}`
+          )}
         </button>
 
       </div>
     </main>
+  );
+}
+
+// ─── Page export — Suspense wrapper required for useSearchParams ──────────────
+
+export default function WeekFormPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-navy-950 flex items-center justify-center">
+          <div className="w-6 h-6 border-2 border-navy-700 border-t-emerald-500 rounded-full animate-spin" />
+        </div>
+      }
+    >
+      <WeekFormInner />
+    </Suspense>
   );
 }

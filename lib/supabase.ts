@@ -1,21 +1,8 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import type { MilestoneRule } from "./types";
+import type { Database } from "./database.types";
 
-// ─── Schema ────────────────────────────────────────────────────────────────
-//
-// Run this SQL in your Supabase SQL editor to create the table:
-//
-//   create table sleeper_league_configs (
-//     id           uuid primary key default gen_random_uuid(),
-//     league_id    text not null unique,
-//     season       text not null,
-//     buy_in       integer not null default 0,
-//     team_count   integer not null default 0,
-//     base_penalty integer not null default 25,
-//     milestones   jsonb not null default '[]',
-//     created_at   timestamptz default now(),
-//     updated_at   timestamptz default now()
-//   );
+// ─── Legacy config interface (sleeper_league_configs table) ─────────────────
 
 export interface SleeperLeagueConfig {
   id?: string;
@@ -29,17 +16,7 @@ export interface SleeperLeagueConfig {
   updated_at?: string;
 }
 
-export type Database = {
-  public: {
-    Tables: {
-      sleeper_league_configs: {
-        Row: Required<SleeperLeagueConfig>;
-        Insert: Omit<SleeperLeagueConfig, "id" | "created_at"> & { updated_at?: string };
-        Update: Partial<Omit<SleeperLeagueConfig, "id" | "created_at">>;
-      };
-    };
-  };
-};
+export type { Database };
 
 // ─── Client ────────────────────────────────────────────────────────────────
 
@@ -75,7 +52,11 @@ export async function getLeagueConfig(
     console.error("[Surge] getLeagueConfig:", error.message);
     return null;
   }
-  return data ?? null;
+  if (!data) return null;
+  return {
+    ...data,
+    milestones: (data.milestones ?? []) as MilestoneRule[],
+  };
 }
 
 /**

@@ -19,6 +19,9 @@ import {
 } from "@/lib/sleeper";
 import { getSleeperSettings } from "@/lib/storage";
 import { getLeagueConfig, SleeperLeagueConfig } from "@/lib/supabase";
+import { createClient } from "@/lib/supabase-browser";
+import { useAuth } from "@/contexts/AuthContext";
+import { getLeagueBySleeperLeagueId, getMember } from "@/lib/db";
 import { calculateSeasonTaxes, calculateWeekTaxes, totalPot } from "@/lib/calc";
 import type { ManualLeague, WeekEntry, MilestoneRule } from "@/lib/types";
 import {
@@ -29,6 +32,9 @@ import {
   AlertCircle,
   RefreshCw,
   Settings,
+  Copy,
+  CheckCircle2,
+  Link2,
 } from "lucide-react";
 
 // ─── Types ─────────────────────────────────────────────────────────────────
@@ -43,10 +49,6 @@ interface TeamInfo {
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
-/**
- * Builds a WeekEntry from raw Sleeper matchup + player-stats data.
- * Evaluates each milestone rule to find qualifying teams.
- */
 function buildWeekEntry(
   week: number,
   leagueId: string,
@@ -61,13 +63,11 @@ function buildWeekEntry(
 
   const milestoneResults = milestones.map((rule) => {
     let qualifyingTeamIds: string[];
-
     if (rule.type === "points") {
       qualifyingTeamIds = valid
         .filter((m) => m.points >= rule.threshold)
         .map((m) => String(m.roster_id));
     } else {
-      // touchdowns — team qualifies if any starter had X+ TDs
       qualifyingTeamIds = valid
         .filter((m) =>
           m.starters.some(
@@ -76,7 +76,6 @@ function buildWeekEntry(
         )
         .map((m) => String(m.roster_id));
     }
-
     return { qualifyingTeamIds };
   });
 
@@ -124,20 +123,53 @@ function Avatar({
   );
 }
 
+// ─── CopyButton ────────────────────────────────────────────────────────────
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={async () => {
+        await navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }}
+      className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-300 transition-colors flex-shrink-0"
+    >
+      {copied ? (
+        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" strokeWidth={1.5} />
+      ) : (
+        <Copy className="w-3.5 h-3.5" strokeWidth={1.5} />
+      )}
+      {copied ? "Copied!" : "Copy"}
+    </button>
+  );
+}
+
 // ─── Page ──────────────────────────────────────────────────────────────────
 
 export default function LeagueDashboard() {
   const { leagueId } = useParams<{ leagueId: string }>();
   const router = useRouter();
+  const { user } = useAuth();
 
-  const [league, setLeague]           = useState<SleeperLeague | null>(null);
-  const [teams, setTeams]             = useState<Map<number, TeamInfo>>(new Map());
-  const [config, setConfig]           = useState<SleeperLeagueConfig | null>(null);
-  const [weekEntries, setWeekEntries] = useState<WeekEntry[]>([]);
-  const [weekLowPts, setWeekLowPts]   = useState<Map<number, number>>(new Map());
-  const [loading, setLoading]         = useState(true);
-  const [loadingMsg, setLoadingMsg]   = useState("Loading league…");
-  const [error, setError]             = useState("");
+  const [supabase] = useState(() => createClient());
+  const [league,       setLeague]       = useState<SleeperLeague | null>(null);
+  const [teams,        setTeams]        = useState<Map<number, TeamInfo>>(new Map());
+  const [config,       setConfig]       = useState<SleeperLeagueConfig | null>(null);
+  const [weekEntries,  setWeekEntries]  = useState<WeekEntry[]>([]);
+  const [weekLowPts,   setWeekLowPts]   = useState<Map<number, number>>(new Map());
+  const [loading,      setLoading]      = useState(true);
+  const [loadingMsg,   setLoadingMsg]   = useState("Loading league…");
+  const [error,        setError]        = useState("");
+  const [isCommissioner, setIsCommissioner] = useState(false);
+  const [leagueRowId,    setLeagueRowId]    = useState<string | null>(null);
+
+  const inviteUrl = useMemo(() => {
+    if (!isCommissioner || !leagueRowId || typeof window === "undefined") return null;
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? window.location.origin;
+    return `${appUrl}/join/${leagueRowId}`;
+  }, [isCommissioner, leagueRowId]);
 
   const loadData = useCallback(async () => {
     try {
@@ -145,19 +177,39 @@ export default function LeagueDashboard() {
       setError("");
       setLoadingMsg("Loading league…");
 
-      // Load league data + Supabase config in parallel
-      const [leagueData, rosters, users, leagueConfig] = await Promise.all([
+      // Fetch Sleeper data + leagues table in parallel
+      const [leagueData, rosters, users, leagueRow, legacyConfig] = await Promise.all([
         getLeague(leagueId),
         getLeagueRosters(leagueId),
         getLeagueUsers(leagueId),
+        getLeagueBySleeperLeagueId(supabase, leagueId).catch(() => null),
         getLeagueConfig(leagueId).catch(() => null),
       ]);
 
       setLeague(leagueData);
 
-      // Resolve config: Supabase → localStorage fallback → redirect to setup
-      let resolvedConfig: SleeperLeagueConfig | null = leagueConfig;
-      if (!resolvedConfig) {
+      // Determine config priority: leagues table → legacy Supabase → localStorage → setup
+      let resolvedConfig: SleeperLeagueConfig | null = null;
+      if (leagueRow) {
+        resolvedConfig = {
+          league_id:    leagueId,
+          season:       leagueRow.season,
+          buy_in:       leagueRow.buy_in,
+          team_count:   leagueRow.team_count,
+          base_penalty: leagueRow.base_penalty,
+          milestones:   (leagueRow.milestones ?? []) as MilestoneRule[],
+          created_at:   leagueRow.created_at,
+        };
+        setLeagueRowId(leagueRow.id);
+
+        // Check role membership
+        if (user) {
+          const membership = await getMember(supabase, leagueRow.id, user.id);
+          setIsCommissioner(membership?.role === "commissioner");
+        }
+      } else if (legacyConfig) {
+        resolvedConfig = legacyConfig;
+      } else {
         const local = getSleeperSettings(leagueId);
         if (local) {
           resolvedConfig = {
@@ -193,10 +245,10 @@ export default function LeagueDashboard() {
       setTeams(teamMap);
 
       // Determine regular-season weeks
-      const playoffStart   = leagueData.settings?.playoff_week_start ?? 15;
-      const lastScored     = leagueData.settings?.last_scored_leg ?? 0;
-      const maxRegular     = playoffStart - 1;
-      const weeksToFetch   = Math.min(lastScored > 0 ? lastScored : maxRegular, maxRegular);
+      const playoffStart = leagueData.settings?.playoff_week_start ?? 15;
+      const lastScored   = leagueData.settings?.last_scored_leg ?? 0;
+      const maxRegular   = playoffStart - 1;
+      const weeksToFetch = Math.min(lastScored > 0 ? lastScored : maxRegular, maxRegular);
       if (weeksToFetch < 1) { setLoading(false); return; }
 
       setLoadingMsg(`Loading ${weeksToFetch} weeks…`);
@@ -204,7 +256,6 @@ export default function LeagueDashboard() {
       const weekNums       = Array.from({ length: weeksToFetch }, (_, i) => i + 1);
       const hasTDMilestone = resolvedConfig.milestones.some((m) => m.type === "touchdowns");
 
-      // Fetch matchups + (if needed) player stats in parallel
       const [allMatchups, allPlayerStats] = await Promise.all([
         Promise.all(weekNums.map((w) => getMatchups(leagueId, w).catch(() => []))),
         hasTDMilestone
@@ -220,9 +271,8 @@ export default function LeagueDashboard() {
             ),
       ]);
 
-      // Build WeekEntry objects
-      const entries: WeekEntry[]       = [];
-      const lowPtsMap                   = new Map<number, number>();
+      const entries: WeekEntry[]      = [];
+      const lowPtsMap                  = new Map<number, number>();
 
       allMatchups.forEach((matchups, i) => {
         const valid = matchups.filter((m) => m.points > 0);
@@ -247,7 +297,7 @@ export default function LeagueDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [leagueId, router]);
+  }, [leagueId, router, supabase, user]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -342,13 +392,25 @@ export default function LeagueDashboard() {
             {league?.season} · {league?.total_rosters} teams
           </p>
         </div>
-        <Link
-          href={`/league/${leagueId}/setup`}
-          className="text-slate-600 hover:text-slate-300 transition-colors p-1"
-          title="Edit league settings"
-        >
-          <Settings className="w-4 h-4" strokeWidth={1.5} />
-        </Link>
+
+        {/* Invite link — commissioner only */}
+        {isCommissioner && inviteUrl && (
+          <div className="flex items-center gap-1.5">
+            <Link2 className="w-3.5 h-3.5 text-slate-600 flex-shrink-0" strokeWidth={1.5} />
+            <CopyButton text={inviteUrl} />
+          </div>
+        )}
+
+        {/* Settings — commissioner only */}
+        {isCommissioner && (
+          <Link
+            href={`/league/${leagueId}/setup`}
+            className="text-slate-600 hover:text-slate-300 transition-colors p-1"
+            title="Edit league settings"
+          >
+            <Settings className="w-4 h-4" strokeWidth={1.5} />
+          </Link>
+        )}
       </div>
 
       <div className="w-full max-w-2xl mx-auto px-4 space-y-4">
@@ -468,12 +530,11 @@ export default function LeagueDashboard() {
             </p>
             <div className="bg-navy-800 border border-navy-700 rounded-xl overflow-hidden divide-y divide-navy-700">
               {weekEntries.map((entry) => {
-                const lowestTeam  = teamById(entry.lowestScorerTeamId);
-                const pts         = weekLowPts.get(entry.week);
-                const charges     = calculateWeekTaxes(entry, adaptedLeague);
-                const weekTotal   = charges.reduce((s, c) => s + c.amount, 0);
+                const lowestTeam = teamById(entry.lowestScorerTeamId);
+                const pts        = weekLowPts.get(entry.week);
+                const charges    = calculateWeekTaxes(entry, adaptedLeague);
+                const weekTotal  = charges.reduce((s, c) => s + c.amount, 0);
 
-                // Milestones that triggered this week
                 const milestonesFired = (config?.milestones ?? [])
                   .map((rule, i) => ({
                     rule,
@@ -513,7 +574,6 @@ export default function LeagueDashboard() {
                       </div>
                     </div>
 
-                    {/* Milestone callouts */}
                     {milestonesFired.length > 0 && (
                       <div className="mt-2 ml-11 space-y-1">
                         {milestonesFired.map(({ rule, qualifiers }, i) => (
