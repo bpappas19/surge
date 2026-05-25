@@ -164,10 +164,10 @@ function LeagueCardView({ card }: { card: LeagueCard }) {
           ${pot.toLocaleString()}
         </p>
 
-        {/* Could reach — prominent amber headline */}
-        {remaining > 0 && maxPot > pot && (
-          <p className="text-lg font-semibold text-amber-400/75 mt-2 tabular-nums leading-snug">
-            Could reach ${maxPot.toLocaleString()}
+        {/* Could reach — prominent amber multiple */}
+        {remaining > 0 && maxPot > pot && pot > 0 && (
+          <p className="text-lg font-semibold text-amber-400/75 mt-2 leading-snug">
+            Could {Math.round(maxPot / pot)}x
           </p>
         )}
       </div>

@@ -92,7 +92,7 @@ export async function getUser(username: string): Promise<SleeperUser> {
 
 export async function getUserLeagues(
   userId: string,
-  season = "2025"
+  season: string
 ): Promise<SleeperLeague[]> {
   const data = await apiFetch<SleeperLeague[] | null>(
     `/user/${userId}/leagues/nfl/${season}`
@@ -146,27 +146,23 @@ export interface SleeperPlayerStats {
   [key: string]: number | undefined;
 }
 
-/** Returns all NFL player stats for one regular-season week, keyed by player_id. */
+/** Returns all NFL player stats for a specific week, keyed by player_id.
+ *  Uses /stats/nfl/{season}/{week} — weekly snapshot, not cumulative totals. */
 export async function getWeekPlayerStats(
   season: string,
   week: number
 ): Promise<Record<string, SleeperPlayerStats>> {
   const data = await apiFetch<Record<string, SleeperPlayerStats> | null>(
-    `/stats/nfl/regular/${season}/${week}`
+    `/stats/nfl/${season}/${week}`
   );
   return data ?? {};
 }
 
-/** Sums all touchdown-type stats for a single player's week. */
+/** Counts anytime touchdowns for a single player's week.
+ *  Only rush_td + rec_td qualify — passing TDs are explicitly excluded. */
 export function countPlayerTDs(stats: SleeperPlayerStats | undefined): number {
   if (!stats) return 0;
-  return (
-    (stats.rush_td ?? 0) +
-    (stats.rec_td ?? 0) +
-    (stats.pass_td ?? 0) +
-    (stats.fum_ret_td ?? 0) +
-    (stats.def_td ?? 0)
-  );
+  return (stats.rush_td ?? 0) + (stats.rec_td ?? 0);
 }
 
 // ─── Derived helpers ───────────────────────────────────────────────────────

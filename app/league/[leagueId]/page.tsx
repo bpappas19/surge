@@ -411,7 +411,7 @@ export default function LeagueDashboard() {
         {/* Settings — commissioner only */}
         {isCommissioner && (
           <Link
-            href={`/league/${leagueId}/setup`}
+            href={`/league/${leagueId}/edit`}
             className="text-slate-600 hover:text-slate-300 transition-colors p-1"
             title="Edit league settings"
           >

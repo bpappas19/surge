@@ -10,13 +10,15 @@ import { getLeagueBySleeperLeagueId, getMember } from "@/lib/db";
 import {
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Search,
   AlertCircle,
   Users,
   Moon,
+  Calendar,
 } from "lucide-react";
 
-// ─── Input class ─────────────────────────────────────────────────────────────
+// ─── Input class ──────────────────────────────────────────────────────────────
 
 const inputCls =
   "w-full bg-navy-900 border border-navy-700 focus:border-teal-500/40 " +
@@ -84,10 +86,15 @@ export default function SleeperPage() {
   const { user } = useAuth();
   const [supabase] = useState(() => createClient());
 
-  const [username, setUsername] = useState("");
-  const [loading,  setLoading]  = useState(false);
-  const [error,    setError]    = useState("");
-  const [leagues,  setLeagues]  = useState<SleeperLeague[] | null>(null);
+  // Dynamically compute the last 3 seasons — updates automatically each year
+  const currentYear = new Date().getFullYear();
+  const yearOptions = [currentYear, currentYear - 1, currentYear - 2];
+
+  const [username,     setUsername]     = useState("");
+  const [selectedYear, setSelectedYear] = useState(currentYear);
+  const [loading,      setLoading]      = useState(false);
+  const [error,        setError]        = useState("");
+  const [leagues,      setLeagues]      = useState<SleeperLeague[] | null>(null);
 
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault();
@@ -100,7 +107,7 @@ export default function SleeperPage() {
 
     try {
       const sleeperUser = await getUser(q);
-      const data = await getUserLeagues(sleeperUser.user_id, "2025");
+      const data = await getUserLeagues(sleeperUser.user_id, String(selectedYear));
       setLeagues(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
@@ -110,8 +117,12 @@ export default function SleeperPage() {
   }
 
   async function handleLeagueClick(league: SleeperLeague) {
-    // Check if this league exists in our DB
-    const leagueRow = await getLeagueBySleeperLeagueId(supabase, league.league_id).catch(() => null);
+    // Check if this specific season's league exists in our DB
+    const leagueRow = await getLeagueBySleeperLeagueId(
+      supabase,
+      league.league_id,
+      league.season
+    ).catch(() => null);
 
     if (!leagueRow) {
       // No Surge config yet — go to setup
@@ -157,22 +168,58 @@ export default function SleeperPage() {
         {/* Search form */}
         <div className="px-8 py-7 lg:px-10 lg:py-9">
           <form onSubmit={handleSearch} className="space-y-3">
-            <div className="relative">
-              <Search
-                className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-600 pointer-events-none"
-                strokeWidth={1.5}
-              />
-              <input
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="Sleeper username"
-                autoCapitalize="none"
-                autoCorrect="off"
-                spellCheck={false}
-                className={`${inputCls} pl-10`}
-              />
+
+            {/* Season year selector */}
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-2 flex items-center gap-1.5">
+                <Calendar className="w-3 h-3" strokeWidth={1.5} />
+                Season year
+              </label>
+              <div className="relative">
+                <select
+                  value={selectedYear}
+                  onChange={(e) => {
+                    setSelectedYear(Number(e.target.value));
+                    setLeagues(null); // clear results when year changes
+                  }}
+                  className={`${inputCls} pr-9 appearance-none cursor-pointer`}
+                >
+                  {yearOptions.map((y) => (
+                    <option key={y} value={y}>
+                      {y}{y === currentYear ? " (current)" : ""}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown
+                  className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-600 pointer-events-none"
+                  strokeWidth={1.5}
+                />
+              </div>
             </div>
+
+            {/* Username input */}
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-2">
+                Sleeper username
+              </label>
+              <div className="relative">
+                <Search
+                  className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-600 pointer-events-none"
+                  strokeWidth={1.5}
+                />
+                <input
+                  type="text"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="e.g. sleeperjoe"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  className={`${inputCls} pl-10`}
+                />
+              </div>
+            </div>
+
             <button
               type="submit"
               disabled={loading || !username.trim()}
@@ -184,7 +231,7 @@ export default function SleeperPage() {
                   Searching…
                 </>
               ) : (
-                "Find leagues"
+                `Find ${selectedYear} leagues`
               )}
             </button>
           </form>
@@ -201,12 +248,14 @@ export default function SleeperPage() {
         {leagues !== null && (
           leagues.length === 0 ? (
             <div className="border-t border-navy-700 px-5 py-8 text-center">
-              <p className="text-sm text-slate-500">No 2025 NFL leagues found for this username.</p>
+              <p className="text-sm text-slate-500">
+                No {selectedYear} NFL leagues found for this username.
+              </p>
             </div>
           ) : (
             <div className="border-t border-navy-700">
               <p className="text-xs font-medium text-slate-600 uppercase tracking-wider px-5 pt-4 pb-2">
-                {leagues.length} league{leagues.length !== 1 ? "s" : ""}
+                {leagues.length} league{leagues.length !== 1 ? "s" : ""} · {selectedYear} season
               </p>
               <div className="divide-y divide-navy-700">
                 {leagues.map((league) => (

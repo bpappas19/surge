@@ -67,13 +67,22 @@ export async function getLeagueById(
 
 export async function getLeagueBySleeperLeagueId(
   db: DB,
-  sleeperLeagueId: string
+  sleeperLeagueId: string,
+  /** When provided, also matches on season so e.g. the same name/ID in 2025
+   *  vs 2026 is treated as two separate Surge leagues. */
+  season?: string
 ): Promise<LeagueRow | null> {
-  const { data, error } = await db
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let query: any = db
     .from("leagues")
     .select("*")
-    .eq("sleeper_league_id", sleeperLeagueId)
-    .maybeSingle();
+    .eq("sleeper_league_id", sleeperLeagueId);
+
+  if (season) {
+    query = query.eq("season", season);
+  }
+
+  const { data, error } = await query.maybeSingle();
   if (error) {
     console.error("[Surge] getLeagueBySleeperLeagueId:", error.message);
     return null;

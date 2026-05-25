@@ -42,14 +42,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
-
-    // Subscribe to future changes (login, logout, token refresh)
+    // onAuthStateChange fires synchronously with INITIAL_SESSION on mount,
+    // which covers both the "already logged in" and "not logged in" cases.
+    // This is faster than calling getSession() separately and avoids a
+    // double-render that can cause the nav to flash blank on first load.
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {

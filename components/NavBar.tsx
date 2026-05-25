@@ -51,17 +51,22 @@ export function NavBar() {
 
         {/* Right side */}
         <div className="flex items-center gap-3">
-          {!loading && (
-            user ? (
-              <>
-                {/* My Leagues icon link */}
-                <Link
-                  href="/leagues"
-                  className="text-slate-500 hover:text-slate-200 transition-colors p-1"
-                  aria-label="My Leagues"
-                >
-                  <LayoutGrid className="w-4 h-4" strokeWidth={1.5} />
-                </Link>
+          {loading ? (
+            /* Skeleton — resolves once auth state is known (typically < 100 ms) */
+            <div className="flex items-center gap-3" aria-hidden>
+              <div className="w-14 h-6 bg-navy-800 rounded animate-pulse" />
+              <div className="w-16 h-6 bg-navy-800 rounded-lg animate-pulse" />
+            </div>
+          ) : user ? (
+            <>
+              {/* My Leagues icon link */}
+              <Link
+                href="/leagues"
+                className="text-slate-500 hover:text-slate-200 transition-colors p-1"
+                aria-label="My Leagues"
+              >
+                <LayoutGrid className="w-4 h-4" strokeWidth={1.5} />
+              </Link>
 
               <div ref={menuRef} className="relative">
                 {/* User avatar button */}
@@ -92,23 +97,22 @@ export function NavBar() {
                   </div>
                 )}
               </div>
-              </>
-            ) : (
-              <div className="flex items-center gap-3">
-                <Link
-                  href="/auth/login"
-                  className="text-xs font-medium text-slate-400 hover:text-slate-200 transition-colors"
-                >
-                  Log in
-                </Link>
-                <Link
-                  href="/auth/signup"
-                  className="text-xs font-medium bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg transition-colors"
-                >
-                  Sign up
-                </Link>
-              </div>
-            )
+            </>
+          ) : (
+            <div className="flex items-center gap-3">
+              <Link
+                href="/auth/login"
+                className="text-xs font-medium text-slate-400 hover:text-slate-200 transition-colors"
+              >
+                Log in
+              </Link>
+              <Link
+                href="/auth/signup"
+                className="text-xs font-medium bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg transition-colors"
+              >
+                Sign up
+              </Link>
+            </div>
           )}
         </div>
       </div>

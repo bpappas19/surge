@@ -244,13 +244,13 @@ function RuleRow({
 export default function SleeperLeagueSetup() {
   const { leagueId } = useParams<{ leagueId: string }>();
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
 
   const [supabase] = useState(() => createClient());
   const [step, setStep] = useState(1);
   const [leagueName, setLeagueName] = useState("");
   const [teamCount, setTeamCount] = useState(0);
-  const [season, setSeason] = useState("2025");
+  const [season, setSeason] = useState(() => String(new Date().getFullYear()));
   const [loadingMeta, setLoadingMeta] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -331,6 +331,10 @@ export default function SleeperLeagueSetup() {
   const startingPot = buyInNum > 0 && teamCount > 0 ? buyInNum * teamCount : 0;
 
   async function launch() {
+    if (authLoading) {
+      setSaveError("Still verifying your session — please wait a moment and try again.");
+      return;
+    }
     if (!user) {
       router.push(`/auth/login?next=/league/${leagueId}/setup`);
       return;
@@ -360,8 +364,8 @@ export default function SleeperLeagueSetup() {
       let leagueRow = await getLeagueBySleeperLeagueId(supabase, leagueId);
 
       if (leagueRow) {
-        // Update existing row
-        await supabase
+        // Update existing row — check error explicitly so failures surface
+        const { error: updateError } = await supabase
           .from("leagues")
           .update({
             buy_in: buyInNum,
@@ -371,6 +375,7 @@ export default function SleeperLeagueSetup() {
             team_count: teamCount,
           })
           .eq("id", leagueRow.id);
+        if (updateError) throw new Error(updateError.message);
       } else {
         // Create new league row
         leagueRow = await createLeague(supabase, {
@@ -400,7 +405,9 @@ export default function SleeperLeagueSetup() {
       setInviteUrl(`${appUrl}/join/${leagueRow.id}`);
       setStep(4);
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "Failed to save config.");
+      const msg = err instanceof Error ? err.message : "Failed to save config.";
+      // Surface the raw message so the commissioner can diagnose permission/RLS errors
+      setSaveError(msg);
       setSaving(false);
     }
   }
@@ -449,7 +456,7 @@ export default function SleeperLeagueSetup() {
               {stepLabels[step - 1]}
             </p>
             <p className="text-xs lg:text-sm text-slate-600 truncate">
-              {leagueName}
+              {leagueName}{season ? ` · ${season}` : ""}
             </p>
           </div>
           <StepDots step={step} />
