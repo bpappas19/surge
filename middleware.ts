@@ -16,7 +16,7 @@ import { createServerClient, type SetAllCookies } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import type { Database } from "@/lib/database.types";
 
-const PROTECTED_PREFIXES = ["/league", "/m/", "/join/", "/sleeper", "/setup"];
+const PROTECTED_PREFIXES = ["/league", "/m/", "/sleeper", "/setup"];
 const AUTH_PREFIXES = ["/auth/"];
 
 export async function middleware(request: NextRequest) {

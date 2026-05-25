@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Logo from "@/components/Logo";
 import { useAuth } from "@/contexts/AuthContext";
-import { LogOut, LayoutGrid } from "lucide-react";
+import { LogOut } from "lucide-react";
 
 export function NavBar() {
   const { user, loading, signOut } = useAuth();
@@ -52,24 +52,32 @@ export function NavBar() {
         {/* Right side */}
         <div className="flex items-center gap-3">
           {loading ? (
-            /* Skeleton — resolves once auth state is known (typically < 100 ms) */
-            <div className="flex items-center gap-3" aria-hidden>
-              <div className="w-14 h-6 bg-navy-800 rounded animate-pulse" />
-              <div className="w-16 h-6 bg-navy-800 rounded-lg animate-pulse" />
+            /* Skeleton — resolves once auth state is known. With server-side
+               initialSession this should never show on a hard refresh. */
+            <div className="flex items-center gap-2" aria-hidden>
+              <div className="w-20 h-6 bg-navy-800 rounded-lg animate-pulse" />
+              <div className="w-24 h-6 bg-navy-800 rounded-lg animate-pulse" />
+              <div className="w-7 h-7 bg-navy-800 rounded-full animate-pulse" />
             </div>
           ) : user ? (
             <>
-              {/* My Leagues icon link */}
-              <Link
-                href="/leagues"
-                className="text-slate-500 hover:text-slate-200 transition-colors p-1"
-                aria-label="My Leagues"
-              >
-                <LayoutGrid className="w-4 h-4" strokeWidth={1.5} />
-              </Link>
+              <div className="flex items-center gap-6">
+                <Link
+                  href="/leagues"
+                  className="text-sm font-medium text-white hover:text-slate-400 transition-colors"
+                >
+                  My Leagues
+                </Link>
+                <Link
+                  href="/create"
+                  className="text-sm font-medium text-white hover:text-slate-400 transition-colors"
+                >
+                  Create Surge
+                </Link>
+              </div>
 
+              {/* User avatar + dropdown */}
               <div ref={menuRef} className="relative">
-                {/* User avatar button */}
                 <button
                   onClick={() => setMenuOpen((v) => !v)}
                   className="w-7 h-7 rounded-full bg-navy-700 border border-navy-600 flex items-center justify-center hover:border-navy-500 transition-colors"
@@ -80,7 +88,6 @@ export function NavBar() {
                   </span>
                 </button>
 
-                {/* Dropdown */}
                 {menuOpen && (
                   <div className="absolute right-0 top-full mt-1.5 min-w-[180px] bg-navy-800 border border-navy-700 rounded-xl shadow-xl overflow-hidden">
                     <div className="px-4 py-3 border-b border-navy-700">
@@ -99,18 +106,19 @@ export function NavBar() {
               </div>
             </>
           ) : (
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
               <Link
                 href="/auth/login"
-                className="text-xs font-medium text-slate-400 hover:text-slate-200 transition-colors"
+                className="text-xs font-medium text-slate-400 hover:text-slate-200 transition-colors px-2 py-1.5"
               >
                 Log in
               </Link>
+              {/* "Create Surge" doubles as the sign-up CTA for logged-out users */}
               <Link
-                href="/auth/signup"
-                className="text-xs font-medium bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg transition-colors"
+                href="/auth/signup?next=/create"
+                className="text-xs font-medium px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white transition-colors"
               >
-                Sign up
+                Create Surge
               </Link>
             </div>
           )}
