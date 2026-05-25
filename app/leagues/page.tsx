@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase-browser";
@@ -15,7 +15,7 @@ import {
 import { totalPot } from "@/lib/calc";
 import type { LeagueRow, MemberRow } from "@/lib/db";
 import type { MilestoneRule, WeekEntry, ManualLeague } from "@/lib/types";
-import { ChevronRight, Plus, Zap } from "lucide-react";
+import { ChevronRight, Plus, Zap, Trophy } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -39,8 +39,13 @@ function weeksPlayed(entries: WeekEntry[]): number {
 function currentPot(card: LeagueCard): number {
   const { row, adaptedLeague, entries } = card;
   const startingPot = row.buy_in * row.team_count;
-  const surges = totalPot(entries, adaptedLeague);
-  return startingPot + surges;
+  // Sleeper leagues don't persist weekly_results to Supabase — the dashboard
+  // computes them live from the Sleeper API and caches the total in
+  // surge_deposit. Use that field instead of the always-empty entries.
+  if (row.mode === "sleeper") {
+    return startingPot + (row.surge_deposit ?? 0);
+  }
+  return startingPot + totalPot(entries, adaptedLeague);
 }
 
 function maxPotential(card: LeagueCard): number {
@@ -49,7 +54,6 @@ function maxPotential(card: LeagueCard): number {
   const played = weeksPlayed(entries);
   const remaining = Math.max(0, TOTAL_WEEKS - played);
 
-  // max weekly = base penalty + sum(taxPerNonQualifier × team_count per milestone)
   const milestoneMax = milestones.reduce(
     (sum, m) => sum + m.taxPerNonQualifier * row.team_count,
     0
@@ -61,15 +65,10 @@ function maxPotential(card: LeagueCard): number {
 function myTaxDebt(card: LeagueCard): number {
   const { myMember, adaptedLeague, entries } = card;
   if (!myMember) return 0;
-
-  // For manual leagues, team id = myMember.id
-  // For sleeper leagues, team ids are roster IDs — we can't match without Sleeper data here,
-  // so we skip the debt calc for sleeper leagues.
   if (card.row.mode !== "manual") return 0;
 
   let debt = 0;
   for (const entry of entries) {
-    // calculateWeekTaxes equivalent inline (avoid circular import issues)
     const config = adaptedLeague.config;
 
     if (entry.lowestScorerTeamId === myMember.id) {
@@ -83,12 +82,8 @@ function myTaxDebt(card: LeagueCard): number {
       const multipleExempt =
         qualifiers.length > 1 && rule.exemptIfMultipleQualify;
 
-      if (rule.exemptIfMultipleQualify && isQualifier) {
-        // exempt — no charge
-        return;
-      }
+      if (rule.exemptIfMultipleQualify && isQualifier) return;
       if (!rule.exemptIfMultipleQualify && !multipleExempt) {
-        // no exemption mode — everyone pays
         debt += rule.taxPerNonQualifier;
         return;
       }
@@ -107,13 +102,24 @@ function LeagueCardView({ card }: { card: LeagueCard }) {
   const isCommissioner =
     myMember?.role === "commissioner" || row.commissioner_id === myMember?.user_id;
 
-  const pot = currentPot(card);
-  const maxPot = maxPotential(card);
-  const played = weeksPlayed(card.entries);
+  const pot       = currentPot(card);
+  const maxPot    = maxPotential(card);
+  const played    = weeksPlayed(card.entries);
   const remaining = Math.max(0, TOTAL_WEEKS - played);
-  const debt = myTaxDebt(card);
+  const debt      = myTaxDebt(card);
 
-  // Progress bar: pot from starting toward maxPot
+  // Season is complete if:
+  //   • champion has been explicitly set, OR
+  //   • all tracked weeks are played, OR
+  //   • the season year is before the current calendar year
+  //     (Sleeper leagues don't store weekly_results in Supabase, so remaining
+  //      would always be 14 for a finished past season without this check)
+  const currentYear = new Date().getFullYear();
+  const isComplete =
+    !!row.champion_team_id ||
+    remaining === 0 ||
+    Number(row.season) < currentYear;
+
   const startingPot = row.buy_in * row.team_count;
   const progress =
     maxPot > startingPot
@@ -134,7 +140,7 @@ function LeagueCardView({ card }: { card: LeagueCard }) {
       }`}
     >
 
-      {/* Pot area — subtle gradient background */}
+      {/* Pot area */}
       <div
         className="px-5 pt-5 pb-4"
         style={{ background: "linear-gradient(160deg, rgba(9,13,24,0.55) 0%, rgba(17,30,50,0) 100%)" }}
@@ -158,22 +164,29 @@ function LeagueCardView({ card }: { card: LeagueCard }) {
 
         {/* Giant pot number */}
         <p className="text-[11px] font-medium text-slate-500 mb-0.5">
-          Current pot
+          {isComplete ? "Final pot" : "Current pot"}
         </p>
         <p className="text-4xl font-bold text-emerald-400 tabular-nums leading-none">
           ${pot.toLocaleString()}
         </p>
 
-        {/* Could reach — prominent amber multiple */}
-        {remaining > 0 && maxPot > pot && pot > 0 && (
-          <p className="text-lg font-semibold text-amber-400/75 mt-2 leading-snug">
-            Could {Math.round(maxPot / pot)}x
-          </p>
+        {/* Season complete badge — replaces the "Could Nx" growth indicator */}
+        {isComplete ? (
+          <div className="flex items-center gap-1.5 mt-2">
+            <Trophy className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" strokeWidth={1.5} />
+            <p className="text-sm font-semibold text-amber-400">Season complete</p>
+          </div>
+        ) : (
+          remaining > 0 && maxPot > pot && pot > 0 && (
+            <p className="text-lg font-semibold text-amber-400/75 mt-2 leading-snug">
+              Could {Math.round(maxPot / pot)}x
+            </p>
+          )
         )}
       </div>
 
-      {/* Progress bar */}
-      {maxPot > startingPot && (
+      {/* Progress bar — only for active seasons where the pot can still grow */}
+      {!isComplete && maxPot > startingPot && (
         <div className="px-5 pb-4">
           <div className="h-[6px] bg-navy-700 rounded-full overflow-hidden">
             <div
@@ -198,12 +211,10 @@ function LeagueCardView({ card }: { card: LeagueCard }) {
       {/* Divider */}
       <div className="border-t border-navy-700 mx-5" />
 
-      {/* Position / debt */}
+      {/* Position / week progress */}
       <div className="px-5 py-3.5 flex items-center justify-between gap-4">
         <div>
-          <p className="text-[10px] text-slate-600 mb-0.5">
-            Your position
-          </p>
+          <p className="text-[10px] text-slate-600 mb-0.5">Your position</p>
           <p className="text-xs font-medium text-slate-400">
             {isCommissioner ? "Commissioner" : "Member"}
             {!isCommissioner && debt > 0 && (
@@ -217,16 +228,14 @@ function LeagueCardView({ card }: { card: LeagueCard }) {
           </p>
         </div>
         <div className="text-right">
-          <p className="text-[10px] text-slate-600 mb-0.5">
-            Season
-          </p>
+          <p className="text-[10px] text-slate-600 mb-0.5">Season</p>
           <p className="text-xs text-slate-500 tabular-nums">
-            Wk {played}/{TOTAL_WEEKS}
+            {isComplete ? "Complete" : `Wk ${played}/${TOTAL_WEEKS}`}
           </p>
         </div>
       </div>
 
-      {/* CTA — solid emerald */}
+      {/* CTA */}
       <div className="px-5 pb-5">
         <Link
           href={dashboardHref}
@@ -245,7 +254,7 @@ function LeagueCardView({ card }: { card: LeagueCard }) {
   );
 }
 
-// ─── Empty state ──────────────────────────────────────────────────────────────
+// ─── Empty states ─────────────────────────────────────────────────────────────
 
 function EmptyState() {
   return (
@@ -257,22 +266,74 @@ function EmptyState() {
       <p className="text-sm text-slate-600 mb-6">
         Set up your league to start tracking the pot.
       </p>
-      <div className="flex flex-col sm:flex-row gap-3 justify-center">
-        <Link
-          href="/sleeper"
-          className="flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-sm px-4 py-2.5 rounded-lg transition-colors"
-        >
-          <Plus className="w-3.5 h-3.5" strokeWidth={2} />
-          Connect Sleeper
-        </Link>
-        <Link
-          href="/setup"
-          className="flex items-center justify-center gap-2 bg-navy-700 hover:bg-navy-600 border border-navy-600 hover:border-navy-500 text-slate-200 font-medium text-sm px-4 py-2.5 rounded-lg transition-colors"
-        >
-          <Plus className="w-3.5 h-3.5" strokeWidth={2} />
-          Manual Setup
-        </Link>
+      <CTAButtons />
+    </div>
+  );
+}
+
+function EmptyYearState({ year }: { year: string }) {
+  return (
+    <div className="bg-navy-800 border border-navy-700 rounded-2xl px-6 py-10 text-center">
+      <div className="w-12 h-12 rounded-full bg-navy-700 flex items-center justify-center mx-auto mb-4">
+        <Zap className="w-5 h-5 text-slate-600" strokeWidth={1.5} />
       </div>
+      <p className="text-slate-300 font-semibold mb-1">No leagues for {year}</p>
+      <p className="text-sm text-slate-600 mb-6">
+        You don&apos;t have any Surge leagues set up for the {year} season.
+      </p>
+      <CTAButtons />
+    </div>
+  );
+}
+
+function CTAButtons() {
+  return (
+    <div className="flex flex-col sm:flex-row gap-3 justify-center">
+      <Link
+        href="/sleeper"
+        className="flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-sm px-4 py-2.5 rounded-lg transition-colors"
+      >
+        <Plus className="w-3.5 h-3.5" strokeWidth={2} />
+        Connect Sleeper
+      </Link>
+      <Link
+        href="/setup"
+        className="flex items-center justify-center gap-2 bg-navy-700 hover:bg-navy-600 border border-navy-600 hover:border-navy-500 text-slate-200 font-medium text-sm px-4 py-2.5 rounded-lg transition-colors"
+      >
+        <Plus className="w-3.5 h-3.5" strokeWidth={2} />
+        Manual setup
+      </Link>
+    </div>
+  );
+}
+
+// ─── Year pill selector ───────────────────────────────────────────────────────
+
+function YearPills({
+  years,
+  selected,
+  onChange,
+}: {
+  years: string[];
+  selected: string;
+  onChange: (y: string) => void;
+}) {
+  if (years.length <= 1) return null; // only show if there's something to filter
+  return (
+    <div className="flex items-center gap-2 overflow-x-auto pb-0.5 -mx-1 px-1">
+      {years.map((year) => (
+        <button
+          key={year}
+          onClick={() => onChange(year)}
+          className={`flex-shrink-0 px-4 py-1.5 rounded-full text-sm font-semibold transition-all border ${
+            selected === year
+              ? "bg-navy-700 border-emerald-500/60 text-white shadow-[0_0_10px_rgba(16,185,129,0.15)]"
+              : "bg-navy-800 border-navy-600 text-slate-400 hover:text-slate-200 hover:border-navy-500"
+          }`}
+        >
+          {year}
+        </button>
+      ))}
     </div>
   );
 }
@@ -284,8 +345,9 @@ export default function LeaguesPage() {
   const router = useRouter();
   const [supabase] = useState(() => createClient());
 
-  const [cards, setCards] = useState<LeagueCard[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [cards,        setCards]        = useState<LeagueCard[]>([]);
+  const [loading,      setLoading]      = useState(true);
+  const [selectedYear, setSelectedYear] = useState("");
 
   const loadLeagues = useCallback(async () => {
     if (!user) return;
@@ -296,23 +358,26 @@ export default function LeaguesPage() {
       return;
     }
 
-    // Load members + weekly results for every league in parallel
     const enriched = await Promise.all(
       rows.map(async (row) => {
         const [members, weekRows] = await Promise.all([
           getMembers(supabase, row.id),
           getWeeklyResults(supabase, row.id),
         ]);
-
-        const myMember = members.find((m) => m.user_id === user.id) ?? null;
-        const entries = weeklyResultsToEntries(weekRows, row.id);
+        const myMember     = members.find((m) => m.user_id === user.id) ?? null;
+        const entries      = weeklyResultsToEntries(weekRows, row.id);
         const adaptedLeague = leagueRowToManualLeague(row, members);
-
         return { row, myMember, allMembers: members, entries, adaptedLeague };
       })
     );
 
     setCards(enriched);
+
+    // Default to the most recent season year across all leagues
+    const years = [...new Set(enriched.map((c) => c.row.season))]
+      .sort((a, b) => Number(b) - Number(a));
+    if (years.length) setSelectedYear(years[0]);
+
     setLoading(false);
   }, [supabase, user]);
 
@@ -323,10 +388,23 @@ export default function LeaguesPage() {
   }, [authLoading, user, router]);
 
   useEffect(() => {
-    if (!authLoading && user) {
-      loadLeagues();
-    }
+    if (!authLoading && user) loadLeagues();
   }, [authLoading, user, loadLeagues]);
+
+  // ── Derived ────────────────────────────────────────────────────────────────
+
+  const years = useMemo(
+    () =>
+      [...new Set(cards.map((c) => c.row.season))].sort(
+        (a, b) => Number(b) - Number(a)
+      ),
+    [cards]
+  );
+
+  const filteredCards = useMemo(
+    () => (selectedYear ? cards.filter((c) => c.row.season === selectedYear) : cards),
+    [cards, selectedYear]
+  );
 
   // ── Loading ────────────────────────────────────────────────────────────────
 
@@ -354,10 +432,24 @@ export default function LeaguesPage() {
       </div>
 
       <div className="w-full max-w-2xl mx-auto px-4 space-y-4">
+        {/* Year pill selector — only visible when leagues span multiple seasons */}
+        {years.length > 1 && (
+          <YearPills
+            years={years}
+            selected={selectedYear}
+            onChange={setSelectedYear}
+          />
+        )}
+
+        {/* League cards or empty state */}
         {cards.length === 0 ? (
           <EmptyState />
+        ) : filteredCards.length === 0 ? (
+          <EmptyYearState year={selectedYear} />
         ) : (
-          cards.map((card) => <LeagueCardView key={card.row.id} card={card} />)
+          filteredCards.map((card) => (
+            <LeagueCardView key={card.row.id} card={card} />
+          ))
         )}
       </div>
     </main>

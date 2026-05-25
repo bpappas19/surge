@@ -182,6 +182,8 @@ export default function ManualSettingsPage() {
   const { user, loading: authLoading } = useAuth();
   const [supabase] = useState(() => createClient());
 
+  const currentYear = new Date().getFullYear();
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -189,6 +191,7 @@ export default function ManualSettingsPage() {
   const [leagueName, setLeagueName] = useState("");
 
   // Form state
+  const [season, setSeason] = useState(String(currentYear));
   const [buyIn, setBuyIn] = useState("");
   const [basePenalty, setBasePenalty] = useState(25);
   const [pointsMilestone, setPointsMilestone] = useState<MilestoneDraft>({
@@ -229,6 +232,7 @@ export default function ManualSettingsPage() {
       }
 
       setLeagueName(row.name);
+      setSeason(row.season ?? String(currentYear));
       setBuyIn(String(row.buy_in));
       setBasePenalty(row.base_penalty);
 
@@ -271,6 +275,7 @@ export default function ManualSettingsPage() {
 
     try {
       await updateLeague(supabase, leagueId, {
+        season,
         buy_in: Number(buyIn),
         base_penalty: basePenalty,
         milestones,
@@ -318,7 +323,9 @@ export default function ManualSettingsPage() {
               Commissioner
             </span>
           </div>
-          <p className="text-xs text-slate-600">League settings</p>
+          <p className="text-xs text-slate-600">
+            League settings{season ? ` · ${season}` : ""}
+          </p>
         </div>
       </div>
 
@@ -346,11 +353,32 @@ export default function ManualSettingsPage() {
           </div>
         )}
 
-        {/* Buy-in */}
+        {/* Season year + buy-in */}
         <div className="bg-navy-800 border border-navy-700 rounded-xl px-5 py-5 space-y-4">
           <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">
             League financials
           </p>
+
+          <div>
+            <label className={labelCls}>Season year</label>
+            <div className="flex items-center gap-2">
+              {[currentYear - 1, currentYear, currentYear + 1].map((yr) => (
+                <button
+                  key={yr}
+                  type="button"
+                  onClick={() => setSeason(String(yr))}
+                  className={`px-4 py-2 rounded-full text-sm font-semibold border transition-all ${
+                    season === String(yr)
+                      ? "bg-navy-700 border-emerald-500/60 text-white shadow-[0_0_10px_rgba(16,185,129,0.15)]"
+                      : "bg-navy-900 border-navy-600 text-slate-400 hover:text-slate-200 hover:border-navy-500"
+                  }`}
+                >
+                  {yr}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div>
             <label className={labelCls}>Buy-in per team</label>
             <div className="relative">

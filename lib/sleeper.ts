@@ -138,30 +138,34 @@ export async function getWinnersBracket(
 // ─── Player stats ──────────────────────────────────────────────────────────
 
 export interface SleeperPlayerStats {
+  /** Pre-computed anytime TD count (rush + rec) provided by Sleeper for skill positions. */
+  anytime_tds?: number;
   rush_td?: number;
   rec_td?: number;
+  /** Passing TDs — intentionally excluded from anytime-TD milestone checks. */
   pass_td?: number;
-  fum_ret_td?: number;
-  def_td?: number;
   [key: string]: number | undefined;
 }
 
 /** Returns all NFL player stats for a specific week, keyed by player_id.
- *  Uses /stats/nfl/{season}/{week} — weekly snapshot, not cumulative totals. */
+ *  Uses /stats/nfl/regular/{season}/{week} — per-week snapshot, not season totals.
+ *  (The path without "regular" returns rankings only and has no TD fields.) */
 export async function getWeekPlayerStats(
   season: string,
   week: number
 ): Promise<Record<string, SleeperPlayerStats>> {
   const data = await apiFetch<Record<string, SleeperPlayerStats> | null>(
-    `/stats/nfl/${season}/${week}`
+    `/stats/nfl/regular/${season}/${week}`
   );
   return data ?? {};
 }
 
-/** Counts anytime touchdowns for a single player's week.
- *  Only rush_td + rec_td qualify — passing TDs are explicitly excluded. */
+/** Counts anytime touchdowns (rush + rec) for a single player's week.
+ *  Prefers Sleeper's pre-computed `anytime_tds` field; falls back to
+ *  summing rush_td + rec_td.  pass_td is intentionally never counted. */
 export function countPlayerTDs(stats: SleeperPlayerStats | undefined): number {
   if (!stats) return 0;
+  if (stats.anytime_tds !== undefined) return stats.anytime_tds;
   return (stats.rush_td ?? 0) + (stats.rec_td ?? 0);
 }
 

@@ -155,7 +155,9 @@ export default function SetupPage() {
   const [errors, setErrors] = useState<string[]>([]);
 
   // Step 1
+  const currentYear = new Date().getFullYear();
   const [leagueName, setLeagueName] = useState("");
+  const [season,     setSeason]     = useState(String(currentYear));
   const [buyIn,      setBuyIn]      = useState("");
   const [teams,      setTeams]      = useState(["", "", ""]);
 
@@ -198,7 +200,7 @@ export default function SetupPage() {
       const supabase = createClient();
       const leagueRow = await createLeague(supabase, {
         name:          leagueName.trim(),
-        season:        new Date().getFullYear().toString(),
+        season,
         buyIn:         Number(buyIn),
         teamCount:     validTeams.length,
         basePenalty,
@@ -268,6 +270,26 @@ export default function SetupPage() {
                 <label className={labelCls}>League name</label>
                 <input type="text" value={leagueName} onChange={(e) => setLeagueName(e.target.value)}
                   placeholder="e.g. The Factory" className={inputCls} autoFocus />
+              </div>
+
+              <div>
+                <label className={labelCls}>Season year</label>
+                <div className="flex items-center gap-2">
+                  {[currentYear, currentYear + 1].map((yr) => (
+                    <button
+                      key={yr}
+                      type="button"
+                      onClick={() => setSeason(String(yr))}
+                      className={`px-4 py-2 rounded-full text-sm font-semibold border transition-all ${
+                        season === String(yr)
+                          ? "bg-navy-700 border-emerald-500/60 text-white shadow-[0_0_10px_rgba(16,185,129,0.15)]"
+                          : "bg-navy-800 border-navy-600 text-slate-400 hover:text-slate-200 hover:border-navy-500"
+                      }`}
+                    >
+                      {yr}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div>
@@ -363,6 +385,7 @@ export default function SetupPage() {
                 <div className="px-5 py-4">
                   <p className="text-xs text-slate-600 mb-1">League</p>
                   <p className="text-sm font-semibold text-slate-100">{leagueName}</p>
+                  <p className="text-xs text-slate-600 mt-0.5">{season} season</p>
                 </div>
                 <div className="px-5 py-4">
                   <p className="text-xs text-slate-600 mb-2">Teams</p>

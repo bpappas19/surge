@@ -334,6 +334,18 @@ export default function LeagueDashboard() {
     [adaptedLeague, weekEntries]
   );
 
+  // Write surge total back to leagues.surge_deposit so the /leagues page can
+  // display the correct pot without needing to call the Sleeper API itself.
+  // Fire-and-forget; runs once after the week data is fully computed.
+  useEffect(() => {
+    if (!leagueRowId || weekEntries.length === 0) return;
+    supabase
+      .from("leagues")
+      .update({ surge_deposit: surgeTotal })
+      .eq("id", leagueRowId)
+      .then();
+  }, [leagueRowId, surgeTotal, supabase]);
+
   const startingPot = config ? config.buy_in * config.team_count : 0;
 
   function teamById(id: string): TeamInfo | undefined {

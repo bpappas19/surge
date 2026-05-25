@@ -93,7 +93,7 @@ export async function getLeagueBySleeperLeagueId(
 export async function updateLeague(
   db: DB,
   id: string,
-  patch: Partial<Pick<LeagueRow, "champion_team_id" | "base_penalty" | "buy_in">> & {
+  patch: Partial<Pick<LeagueRow, "champion_team_id" | "base_penalty" | "buy_in" | "season">> & {
     milestones?: MilestoneRule[];
   }
 ): Promise<void> {

@@ -283,6 +283,9 @@ export default function SleeperLeagueEditPage() {
         milestones,
       });
       setSaved(true);
+      // Bust the Next.js router cache so the dashboard re-fetches config
+      // immediately when we navigate back — no manual reload needed.
+      router.refresh();
       setTimeout(() => setSaved(false), 3000);
     } catch (err) {
       setSaveError(
