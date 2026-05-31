@@ -21,6 +21,7 @@ import {
   Plus,
   TrendingDown,
   Trophy,
+  Zap,
   Check,
   Copy,
   CheckCircle2,
@@ -181,7 +182,7 @@ export default function ManualDashboard() {
               </span>
             )}
           </div>
-          <p className="text-xs text-slate-600">{league.teams.length} teams</p>
+          <p className="text-xs text-slate-600">{league.teams.length} team{league.teams.length !== 1 ? "s" : ""}</p>
         </div>
         {isCommissioner && inviteUrl && (
           <div className="flex items-center gap-1.5">
@@ -236,6 +237,41 @@ export default function ManualDashboard() {
             </>
           )}
         </div>
+
+        {/* ── Pre-season rules card ── */}
+        {entries.length === 0 && (
+          <div className="bg-navy-800 border border-navy-700 rounded-xl p-4 space-y-3">
+            <p className="text-xs font-medium text-slate-600 uppercase tracking-wider">How your pot grows</p>
+            <div className="space-y-2.5">
+              <div className="flex items-start gap-2.5">
+                <TrendingDown className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" strokeWidth={1.5} />
+                <p className="text-sm text-slate-300">
+                  Lowest scorer each week owes{" "}
+                  <span className="font-semibold text-slate-100">${league.config.basePenalty}</span>
+                </p>
+              </div>
+              {league.config.milestones.map((m, i) => (
+                <div key={i} className="flex items-start gap-2.5">
+                  <Zap className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" strokeWidth={1.5} />
+                  <p className="text-sm text-slate-300">
+                    {m.type === "points" ? (
+                      <>Any team scoring <span className="font-semibold text-slate-100">{m.threshold}+ pts</span> — everyone else pays <span className="font-semibold text-slate-100">${m.taxPerNonQualifier}</span></>
+                    ) : (
+                      <>Any player scoring <span className="font-semibold text-slate-100">{m.threshold}+ TDs</span> — everyone else pays <span className="font-semibold text-slate-100">${m.taxPerNonQualifier}</span></>
+                    )}
+                    {m.exemptIfMultipleQualify && (
+                      <span className="text-slate-600"> (qualifiers are exempt)</span>
+                    )}
+                  </p>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center gap-2 pt-2 border-t border-navy-700">
+              <Trophy className="w-3.5 h-3.5 text-slate-600 flex-shrink-0" strokeWidth={1.5} />
+              <p className="text-xs text-slate-600">Taxes accumulate all season. Winner collects everything.</p>
+            </div>
+          </div>
+        )}
 
         {/* ── Champion section ── */}
         <div className="bg-navy-800 border border-navy-700 rounded-xl overflow-hidden">

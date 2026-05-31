@@ -18,6 +18,81 @@ const primaryBtnCls =
   "active:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed " +
   "text-white font-medium rounded-lg py-2.5 text-sm transition-colors";
 
+// ─── Forgot password inline form ─────────────────────────────────────────────
+
+function ForgotPasswordForm({ onBack }: { onBack: () => void }) {
+  const [email,   setEmail]   = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error,   setError]   = useState("");
+  const [sent,    setSent]    = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+
+    const supabase = createClient();
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: (process.env.NEXT_PUBLIC_APP_URL ?? "") + "/auth/reset-password",
+    });
+
+    if (error) {
+      setError(error.message);
+      setLoading(false);
+      return;
+    }
+
+    setSent(true);
+    setLoading(false);
+  }
+
+  return (
+    <div className="px-8 py-7">
+      <button
+        onClick={onBack}
+        className="text-xs text-slate-600 hover:text-slate-400 transition-colors mb-5 flex items-center gap-1"
+      >
+        ← Back to sign in
+      </button>
+
+      {sent ? (
+        <p className="text-sm text-emerald-400">Check your email for a reset link.</p>
+      ) : (
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-xs text-slate-500 mb-1.5">Email</label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              autoComplete="email"
+              required
+              className={inputCls}
+            />
+          </div>
+
+          {error && (
+            <div className="flex items-start gap-2.5 bg-red-500/10 border border-red-500/20 rounded-lg px-3.5 py-3">
+              <AlertCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0 mt-0.5" strokeWidth={1.5} />
+              <p className="text-red-400 text-xs">{error}</p>
+            </div>
+          )}
+
+          <button type="submit" disabled={loading || !email} className={primaryBtnCls}>
+            {loading ? (
+              <>
+                <span className="w-3.5 h-3.5 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                Sending…
+              </>
+            ) : "Send reset link"}
+          </button>
+        </form>
+      )}
+    </div>
+  );
+}
+
 // ─── Inner component (uses useSearchParams — must be inside Suspense) ─────────
 
 function LoginForm() {
@@ -25,10 +100,11 @@ function LoginForm() {
   const searchParams  = useSearchParams();
   const next          = searchParams.get("next") ?? "/";
 
-  const [email,    setEmail]    = useState("");
-  const [password, setPassword] = useState("");
-  const [loading,  setLoading]  = useState(false);
-  const [error,    setError]    = useState("");
+  const [email,         setEmail]         = useState("");
+  const [password,      setPassword]      = useState("");
+  const [loading,       setLoading]       = useState(false);
+  const [error,         setError]         = useState("");
+  const [showForgot,    setShowForgot]    = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -64,62 +140,84 @@ function LoginForm() {
             <Zap className="w-5 h-5 text-emerald-400" fill="currentColor" strokeWidth={0} />
             <span className="text-sm font-bold text-white tracking-tight">Surge</span>
           </div>
-          <p className="text-base font-semibold text-slate-100">Welcome back</p>
-          <p className="text-xs text-slate-500 mt-1">Sign in to your account</p>
+          {showForgot ? (
+            <>
+              <p className="text-base font-semibold text-slate-100">Reset password</p>
+              <p className="text-xs text-slate-500 mt-1">We&apos;ll email you a link</p>
+            </>
+          ) : (
+            <>
+              <p className="text-base font-semibold text-slate-100">Welcome back</p>
+              <p className="text-xs text-slate-500 mt-1">Sign in to your account</p>
+            </>
+          )}
         </div>
 
-        {/* Form */}
-        <div className="px-8 py-7">
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-xs text-slate-500 mb-1.5">Email</label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-                autoComplete="email"
-                required
-                className={inputCls}
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-slate-500 mb-1.5">Password</label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                autoComplete="current-password"
-                required
-                className={inputCls}
-              />
-            </div>
-
-            {error && (
-              <div className="flex items-start gap-2.5 bg-red-500/10 border border-red-500/20 rounded-lg px-3.5 py-3">
-                <AlertCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0 mt-0.5" strokeWidth={1.5} />
-                <p className="text-red-400 text-xs">{error}</p>
+        {/* Body */}
+        {showForgot ? (
+          <ForgotPasswordForm onBack={() => setShowForgot(false)} />
+        ) : (
+          <div className="px-8 py-7">
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs text-slate-500 mb-1.5">Email</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  autoComplete="email"
+                  required
+                  className={inputCls}
+                />
               </div>
-            )}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs text-slate-500">Password</label>
+                  <button
+                    type="button"
+                    onClick={() => setShowForgot(true)}
+                    className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
+                  >
+                    Forgot password?
+                  </button>
+                </div>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  autoComplete="current-password"
+                  required
+                  className={inputCls}
+                />
+              </div>
 
-            <button type="submit" disabled={loading || !email || !password} className={primaryBtnCls}>
-              {loading ? (
-                <>
-                  <span className="w-3.5 h-3.5 border-2 border-white/20 border-t-white rounded-full animate-spin" />
-                  Signing in…
-                </>
-              ) : "Sign in"}
-            </button>
-          </form>
+              {error && (
+                <div className="flex items-start gap-2.5 bg-red-500/10 border border-red-500/20 rounded-lg px-3.5 py-3">
+                  <AlertCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0 mt-0.5" strokeWidth={1.5} />
+                  <p className="text-red-400 text-xs">{error}</p>
+                </div>
+              )}
 
-          <p className="text-xs text-slate-600 text-center mt-5">
-            Don&apos;t have an account?{" "}
-            <Link href={signupHref} className="text-emerald-400 hover:text-emerald-300 transition-colors">
-              Sign up
-            </Link>
-          </p>
-        </div>
+              <button type="submit" disabled={loading || !email || !password} className={primaryBtnCls}>
+                {loading ? (
+                  <>
+                    <span className="w-3.5 h-3.5 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                    Signing in…
+                  </>
+                ) : "Sign in"}
+              </button>
+            </form>
+
+            <p className="text-xs text-slate-600 text-center mt-5">
+              Don&apos;t have an account?{" "}
+              <Link href={signupHref} className="text-emerald-400 hover:text-emerald-300 transition-colors">
+                Sign up
+              </Link>
+            </p>
+          </div>
+        )}
       </div>
     </main>
   );

@@ -7,15 +7,23 @@ import {
   getLeagueRosters,
   getLeagueUsers,
   getMatchups,
+  getWeekPlayerStats,
+  countPlayerTDs,
   getWinnersBracket,
   findChampionRosterId,
   avatarUrl,
   SleeperLeague,
   SleeperLeagueUser,
   SleeperRoster,
+  SleeperMatchup,
+  SleeperPlayerStats,
 } from "@/lib/sleeper";
 import { getSleeperSettings } from "@/lib/storage";
 import { getLeagueConfig, SleeperLeagueConfig } from "@/lib/supabase";
+import { createClient } from "@/lib/supabase-browser";
+import { getLeagueBySleeperLeagueId } from "@/lib/db";
+import { totalPot, calculateSeasonTaxes } from "@/lib/calc";
+import type { ManualLeague, WeekEntry, MilestoneRule } from "@/lib/types";
 import {
   ChevronLeft,
   Trophy,
@@ -30,6 +38,47 @@ interface TeamInfo {
   displayName: string;
   teamName: string;
   avatar: string | null;
+}
+
+// ─── Helpers ───────────────────────────────────────────────────────────────
+
+function buildWeekEntry(
+  week: number,
+  leagueId: string,
+  matchups: SleeperMatchup[],
+  milestones: MilestoneRule[],
+  playerStats: Record<string, SleeperPlayerStats>
+): WeekEntry | null {
+  const valid = matchups.filter((m) => m.points > 0);
+  if (!valid.length) return null;
+
+  const lowest = valid.reduce((min, m) => (m.points < min.points ? m : min));
+
+  const milestoneResults = milestones.map((rule) => {
+    let qualifyingTeamIds: string[];
+    if (rule.type === "points") {
+      qualifyingTeamIds = valid
+        .filter((m) => m.points >= rule.threshold)
+        .map((m) => String(m.roster_id));
+    } else {
+      qualifyingTeamIds = valid
+        .filter((m) =>
+          m.starters.some(
+            (playerId) => countPlayerTDs(playerStats[playerId]) >= rule.threshold
+          )
+        )
+        .map((m) => String(m.roster_id));
+    }
+    return { qualifyingTeamIds };
+  });
+
+  return {
+    leagueId,
+    week,
+    lowestScorerTeamId: String(lowest.roster_id),
+    milestoneResults,
+    submittedAt: "",
+  };
 }
 
 // ─── Avatar ────────────────────────────────────────────────────────────────
@@ -67,6 +116,7 @@ export default function PayoutsPage() {
   const { leagueId } = useParams<{ leagueId: string }>();
   const router = useRouter();
 
+  const [supabase] = useState(() => createClient());
   const [league, setLeague]               = useState<SleeperLeague | null>(null);
   const [teams, setTeams]                 = useState<Map<number, TeamInfo>>(new Map());
   const [taxByRoster, setTaxByRoster]     = useState<Map<number, number>>(new Map());
@@ -81,26 +131,42 @@ export default function PayoutsPage() {
       setLoading(true);
       setError("");
 
-      const [leagueData, rosters, users, bracket, leagueConfig] = await Promise.all([
+      const [leagueData, rosters, users, bracket, leagueRow, legacyConfig] = await Promise.all([
         getLeague(leagueId),
         getLeagueRosters(leagueId),
         getLeagueUsers(leagueId),
         getWinnersBracket(leagueId).catch(() => []),
+        getLeagueBySleeperLeagueId(supabase, leagueId).catch(() => null),
         getLeagueConfig(leagueId).catch(() => null),
       ]);
 
       setLeague(leagueData);
       setChampionId(findChampionRosterId(bracket));
 
-      // Resolve config for pot total
-      let resolvedConfig = leagueConfig;
-      if (!resolvedConfig) {
+      // Same config priority as dashboard: leagues table → legacy supabase → localStorage
+      let resolvedConfig: SleeperLeagueConfig | null = null;
+      if (leagueRow) {
+        resolvedConfig = {
+          league_id:    leagueId,
+          season:       leagueRow.season,
+          buy_in:       leagueRow.buy_in,
+          team_count:   leagueRow.team_count,
+          base_penalty: leagueRow.base_penalty,
+          milestones:   (leagueRow.milestones ?? []) as MilestoneRule[],
+          created_at:   leagueRow.created_at,
+        };
+      } else if (legacyConfig) {
+        resolvedConfig = legacyConfig;
+      } else {
         const local = getSleeperSettings(leagueId);
         if (local) {
           resolvedConfig = {
-            league_id: leagueId, season: leagueData.season,
-            buy_in: local.buyIn, team_count: local.teamCount,
-            base_penalty: 25, milestones: [],
+            league_id:    leagueId,
+            season:       leagueData.season,
+            buy_in:       local.buyIn,
+            team_count:   local.teamCount,
+            base_penalty: 25,
+            milestones:   [],
           };
         }
       }
@@ -125,31 +191,66 @@ export default function PayoutsPage() {
       const maxRegular   = playoffStart - 1;
       const weeksToFetch = Math.min(lastScored > 0 ? lastScored : maxRegular, maxRegular);
 
-      if (weeksToFetch >= 1) {
-        const weekNums    = Array.from({ length: weeksToFetch }, (_, i) => i + 1);
-        const allMatchups = await Promise.all(
-          weekNums.map((w) => getMatchups(leagueId, w).catch(() => []))
-        );
+      if (weeksToFetch >= 1 && resolvedConfig) {
+        const weekNums       = Array.from({ length: weeksToFetch }, (_, i) => i + 1);
+        const hasTDMilestone = resolvedConfig.milestones.some((m) => m.type === "touchdowns");
 
-        const penalty = resolvedConfig?.base_penalty ?? 25;
+        const [allMatchups, allPlayerStats] = await Promise.all([
+          Promise.all(weekNums.map((w) => getMatchups(leagueId, w).catch(() => []))),
+          hasTDMilestone
+            ? Promise.all(
+                weekNums.map((w) =>
+                  getWeekPlayerStats(leagueData.season, w).catch(
+                    (): Record<string, SleeperPlayerStats> => ({})
+                  )
+                )
+              )
+            : Promise.resolve(
+                weekNums.map((): Record<string, SleeperPlayerStats> => ({}))
+              ),
+        ]);
+
+        const adaptedLeague: ManualLeague = {
+          id:   leagueId,
+          name: leagueData.name,
+          teams: Array.from(teamMap.values()).map((t) => ({
+            id:   String(t.rosterId),
+            name: t.teamName,
+          })),
+          config: {
+            basePenalty: resolvedConfig.base_penalty,
+            milestones:  resolvedConfig.milestones,
+            buyIn:       resolvedConfig.buy_in,
+          },
+          createdAt: resolvedConfig.created_at ?? "",
+        };
+
+        const weekEntries: WeekEntry[] = [];
+        allMatchups.forEach((matchups, i) => {
+          const entry = buildWeekEntry(
+            weekNums[i],
+            leagueId,
+            matchups,
+            resolvedConfig!.milestones,
+            allPlayerStats[i]
+          );
+          if (entry) weekEntries.push(entry);
+        });
+
+        const seasonRecords = calculateSeasonTaxes(weekEntries, adaptedLeague);
         const taxMap = new Map<number, number>();
-        let total = 0;
-        allMatchups.forEach((matchups) => {
-          const valid = matchups.filter((m) => m.points > 0);
-          if (!valid.length) return;
-          const lowest = valid.reduce((min, m) => (m.points < min.points ? m : min));
-          taxMap.set(lowest.roster_id, (taxMap.get(lowest.roster_id) ?? 0) + penalty);
-          total += penalty;
+        seasonRecords.forEach(({ team, totalOwed }) => {
+          taxMap.set(Number(team.id), totalOwed);
         });
         setTaxByRoster(taxMap);
-        setSurgeTotal(total);
+        setSurgeTotal(totalPot(weekEntries, adaptedLeague));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load data.");
     } finally {
       setLoading(false);
     }
-  }, [leagueId]);
+  }, [leagueId, supabase]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
