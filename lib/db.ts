@@ -27,6 +27,7 @@ export async function createLeague(
     mode: "manual" | "sleeper";
     sleeperLeagueId?: string;
     commissionerId: string;
+    totalWeeks?: number;
   }
 ): Promise<LeagueRow> {
   const { data: row, error } = await db
@@ -42,6 +43,7 @@ export async function createLeague(
       mode: data.mode,
       sleeper_league_id: data.sleeperLeagueId ?? null,
       commissioner_id: data.commissionerId,
+      total_weeks: data.totalWeeks ?? 14,
     })
     .select()
     .single();
@@ -93,7 +95,7 @@ export async function getLeagueBySleeperLeagueId(
 export async function updateLeague(
   db: DB,
   id: string,
-  patch: Partial<Pick<LeagueRow, "champion_team_id" | "base_penalty" | "buy_in" | "season">> & {
+  patch: Partial<Pick<LeagueRow, "champion_team_id" | "base_penalty" | "buy_in" | "season" | "total_weeks">> & {
     milestones?: MilestoneRule[];
   }
 ): Promise<void> {

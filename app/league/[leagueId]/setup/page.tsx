@@ -276,6 +276,7 @@ export default function SleeperLeagueSetup() {
     taxAmount: 10,
     exemptIfMultipleQualify: true,
   });
+  const [totalWeeks, setTotalWeeks] = useState(14);
 
   useEffect(() => {
     // Load Sleeper league metadata
@@ -293,6 +294,7 @@ export default function SleeperLeagueSetup() {
         if (row) {
           setBuyIn(String(row.buy_in));
           setBasePenalty(row.base_penalty);
+          setTotalWeeks(row.total_weeks ?? 14);
           const milestones = (row.milestones ?? []) as MilestoneRule[];
           const ptRule = milestones.find((m) => m.type === "points");
           const tdRule = milestones.find((m) => m.type === "touchdowns");
@@ -373,6 +375,7 @@ export default function SleeperLeagueSetup() {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             milestones: milestones as any,
             team_count: teamCount,
+            total_weeks: totalWeeks,
           })
           .eq("id", leagueRow.id);
         if (updateError) throw new Error(updateError.message);
@@ -388,6 +391,7 @@ export default function SleeperLeagueSetup() {
           mode: "sleeper",
           sleeperLeagueId: leagueId,
           commissionerId: user.id,
+          totalWeeks,
         });
       }
 
@@ -639,6 +643,30 @@ export default function SleeperLeagueSetup() {
                   )}
                 </div>
                 <div className="pb-4" />
+              </div>
+
+              <div className="bg-navy-800 border border-navy-700 rounded-xl px-5 py-4">
+                <p className="text-xs text-slate-600 mb-3">Regular season length</p>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setTotalWeeks((w) => Math.max(10, w - 1))}
+                    disabled={totalWeeks <= 10}
+                    className="w-9 h-9 rounded-lg bg-navy-900 border border-navy-700 text-slate-300 hover:bg-navy-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex items-center justify-center font-medium select-none"
+                  >
+                    −
+                  </button>
+                  <span className="text-sm font-semibold text-slate-100 tabular-nums w-8 text-center">{totalWeeks}</span>
+                  <button
+                    type="button"
+                    onClick={() => setTotalWeeks((w) => Math.min(18, w + 1))}
+                    disabled={totalWeeks >= 18}
+                    className="w-9 h-9 rounded-lg bg-navy-900 border border-navy-700 text-slate-300 hover:bg-navy-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex items-center justify-center font-medium select-none"
+                  >
+                    +
+                  </button>
+                  <span className="text-xs text-slate-600">weeks · most leagues play 14</span>
+                </div>
               </div>
 
               <button

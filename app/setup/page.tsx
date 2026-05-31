@@ -165,6 +165,7 @@ export default function SetupPage() {
   const [basePenalty,       setBasePenalty]       = useState(25);
   const [pointsMilestone,   setPointsMilestone]   = useState<MilestoneDraft>({ enabled: false, threshold: 130, taxAmount: 10, exemptIfMultipleQualify: true });
   const [tdMilestone,       setTdMilestone]       = useState<MilestoneDraft>({ enabled: false, threshold: 3,   taxAmount: 10, exemptIfMultipleQualify: true });
+  const [totalWeeks,        setTotalWeeks]        = useState(14);
 
   // Launch state
   const [saving,          setSaving]          = useState(false);
@@ -207,6 +208,7 @@ export default function SetupPage() {
         milestones,
         mode:          "manual",
         commissionerId: user.id,
+        totalWeeks,
       });
 
       // Add commissioner as first member
@@ -415,6 +417,30 @@ export default function SetupPage() {
                     : <RuleRow label="TD threshold" value="Off" />}
                 </div>
                 <div className="pb-4" />
+              </div>
+
+              <div className="bg-navy-800 border border-navy-700 rounded-xl px-5 py-4">
+                <p className="text-xs text-slate-600 mb-3">Regular season length</p>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setTotalWeeks((w) => Math.max(10, w - 1))}
+                    disabled={totalWeeks <= 10}
+                    className="w-9 h-9 rounded-lg bg-navy-900 border border-navy-700 text-slate-300 hover:bg-navy-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex items-center justify-center font-medium select-none"
+                  >
+                    −
+                  </button>
+                  <span className="text-sm font-semibold text-slate-100 tabular-nums w-8 text-center">{totalWeeks}</span>
+                  <button
+                    type="button"
+                    onClick={() => setTotalWeeks((w) => Math.min(18, w + 1))}
+                    disabled={totalWeeks >= 18}
+                    className="w-9 h-9 rounded-lg bg-navy-900 border border-navy-700 text-slate-300 hover:bg-navy-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex items-center justify-center font-medium select-none"
+                  >
+                    +
+                  </button>
+                  <span className="text-xs text-slate-600">weeks · most leagues play 14</span>
+                </div>
               </div>
 
               {saveError && (

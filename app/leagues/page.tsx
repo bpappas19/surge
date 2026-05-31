@@ -29,8 +29,6 @@ interface LeagueCard {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const TOTAL_WEEKS = 14;
-
 function weeksPlayed(entries: WeekEntry[]): number {
   if (!entries.length) return 0;
   return Math.max(...entries.map((e) => e.week));
@@ -52,7 +50,7 @@ function maxPotential(card: LeagueCard): number {
   const { row, adaptedLeague, entries } = card;
   const milestones = (row.milestones ?? []) as MilestoneRule[];
   const played = weeksPlayed(entries);
-  const remaining = Math.max(0, TOTAL_WEEKS - played);
+  const remaining = Math.max(0, (card.row.total_weeks ?? 14) - played);
 
   const milestoneMax = milestones.reduce(
     (sum, m) => sum + m.taxPerNonQualifier * row.team_count,
@@ -105,7 +103,7 @@ function LeagueCardView({ card }: { card: LeagueCard }) {
   const pot       = currentPot(card);
   const maxPot    = maxPotential(card);
   const played    = weeksPlayed(card.entries);
-  const remaining = Math.max(0, TOTAL_WEEKS - played);
+  const remaining = Math.max(0, (row.total_weeks ?? 14) - played);
   const debt      = myTaxDebt(card);
 
   // Season is complete if:
@@ -230,7 +228,7 @@ function LeagueCardView({ card }: { card: LeagueCard }) {
         <div className="text-right">
           <p className="text-[10px] text-slate-600 mb-0.5">Season</p>
           <p className="text-xs text-slate-500 tabular-nums">
-            {isComplete ? "Complete" : `Wk ${played}/${TOTAL_WEEKS}`}
+            {isComplete ? "Complete" : `Wk ${played}/${row.total_weeks ?? 14}`}
           </p>
         </div>
       </div>

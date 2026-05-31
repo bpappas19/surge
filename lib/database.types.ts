@@ -7,6 +7,9 @@
  *   -- Add champion tracking (if not already present)
  *   ALTER TABLE leagues ADD COLUMN IF NOT EXISTS champion_team_id text;
  *
+ *   -- Add per-league regular-season length
+ *   ALTER TABLE leagues ADD COLUMN IF NOT EXISTS total_weeks integer DEFAULT 14;
+ *
  *   -- Unique constraint for weekly results upsert
  *   ALTER TABLE weekly_results
  *     ADD CONSTRAINT IF NOT EXISTS weekly_results_league_week_key
@@ -55,6 +58,7 @@ export interface Database {
           mode: "manual" | "sleeper";
           commissioner_id: string;
           champion_team_id: string | null;
+          total_weeks: number | null;
           created_at: string;
         };
         Insert: {
@@ -70,6 +74,7 @@ export interface Database {
           mode: "manual" | "sleeper";
           commissioner_id: string;
           champion_team_id?: string | null;
+          total_weeks?: number | null;
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["leagues"]["Insert"]>;

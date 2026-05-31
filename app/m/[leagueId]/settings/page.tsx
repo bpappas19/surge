@@ -194,6 +194,7 @@ export default function ManualSettingsPage() {
   const [season, setSeason] = useState(String(currentYear));
   const [buyIn, setBuyIn] = useState("");
   const [basePenalty, setBasePenalty] = useState(25);
+  const [totalWeeks, setTotalWeeks] = useState(14);
   const [pointsMilestone, setPointsMilestone] = useState<MilestoneDraft>({
     enabled: false,
     threshold: 130,
@@ -235,6 +236,7 @@ export default function ManualSettingsPage() {
       setSeason(row.season ?? String(currentYear));
       setBuyIn(String(row.buy_in));
       setBasePenalty(row.base_penalty);
+      setTotalWeeks(row.total_weeks ?? 14);
 
       const milestones = (row.milestones ?? []) as MilestoneRule[];
       const ptRule = milestones.find((m) => m.type === "points");
@@ -278,6 +280,7 @@ export default function ManualSettingsPage() {
         season,
         buy_in: Number(buyIn),
         base_penalty: basePenalty,
+        total_weeks: totalWeeks,
         milestones,
       });
       setSaved(true);
@@ -392,6 +395,31 @@ export default function ManualSettingsPage() {
                 className={`${inputCls} pl-7`}
                 min={0}
               />
+            </div>
+          </div>
+
+          <div>
+            <label className={labelCls}>Regular season length</label>
+            <p className="text-xs text-slate-600 -mt-1 mb-3">Most leagues play 14 weeks — adjust if yours differs.</p>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setTotalWeeks((w) => Math.max(10, w - 1))}
+                disabled={totalWeeks <= 10}
+                className="w-9 h-9 rounded-lg bg-navy-900 border border-navy-700 text-slate-300 hover:bg-navy-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex items-center justify-center font-medium select-none"
+              >
+                −
+              </button>
+              <span className="text-sm font-semibold text-slate-100 tabular-nums w-8 text-center">{totalWeeks}</span>
+              <button
+                type="button"
+                onClick={() => setTotalWeeks((w) => Math.min(18, w + 1))}
+                disabled={totalWeeks >= 18}
+                className="w-9 h-9 rounded-lg bg-navy-900 border border-navy-700 text-slate-300 hover:bg-navy-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex items-center justify-center font-medium select-none"
+              >
+                +
+              </button>
+              <span className="text-xs text-slate-600">weeks</span>
             </div>
           </div>
         </div>
