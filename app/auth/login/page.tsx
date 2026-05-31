@@ -172,16 +172,7 @@ function LoginForm() {
                 />
               </div>
               <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="block text-xs text-slate-500">Password</label>
-                  <button
-                    type="button"
-                    onClick={() => setShowForgot(true)}
-                    className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
-                  >
-                    Forgot password?
-                  </button>
-                </div>
+                <label className="block text-xs text-slate-500 mb-1.5">Password</label>
                 <input
                   type="password"
                   value={password}
@@ -215,6 +206,15 @@ function LoginForm() {
               <Link href={signupHref} className="text-emerald-400 hover:text-emerald-300 transition-colors">
                 Sign up
               </Link>
+            </p>
+            <p className="text-xs text-center mt-2">
+              <button
+                type="button"
+                onClick={() => setShowForgot(true)}
+                className="text-slate-500 hover:text-slate-300 transition-colors"
+              >
+                Forgot password?
+              </button>
             </p>
           </div>
         )}
