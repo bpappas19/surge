@@ -42,14 +42,14 @@ export function StripeConnectCard({ leagueId, mode, sleeperId }: Props) {
   }
 
   return (
-    <div className="bg-navy-800 border border-navy-700 rounded-xl px-5 py-5 space-y-4">
+    <div className="bg-[#0d1420] border border-white/6 rounded-2xl p-5 sm:p-6 space-y-4">
       {/* Header */}
       <div className="flex items-center gap-3">
         <div className="w-9 h-9 rounded-lg bg-[#635bff]/10 border border-[#635bff]/25 flex items-center justify-center flex-shrink-0">
           <CreditCard className="w-4 h-4 text-[#7c75ff]" strokeWidth={1.5} />
         </div>
         <div>
-          <p className="text-sm font-medium text-slate-200">Set up payments</p>
+          <p className="text-sm font-semibold text-white">Set up payments</p>
           <p className="text-xs text-slate-600">Powered by Stripe Connect</p>
         </div>
       </div>
@@ -78,7 +78,7 @@ export function StripeConnectCard({ leagueId, mode, sleeperId }: Props) {
       <button
         onClick={handleConnect}
         disabled={loading}
-        className="w-full flex items-center justify-center gap-2 bg-[#635bff] hover:bg-[#5850e0] active:bg-[#4e47c9] disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded-lg py-2.5 text-sm transition-colors"
+        className="w-full flex items-center justify-center gap-2 bg-[#635bff] hover:bg-[#5850e0] active:bg-[#4e47c9] disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded-xl py-2.5 text-sm transition-colors"
       >
         {loading ? (
           <>

@@ -1,63 +1,30 @@
 "use client";
 
-import { Suspense, useEffect, useState, useMemo, useCallback } from "react";
+import { Suspense, useEffect, useState, useMemo } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase-browser";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   getLeagueById,
-  getMembers,
+  getManualTeams,
   getWeeklyResults,
-  leagueRowToManualLeague,
+  manualTeamsToLeague,
   weeklyResultsToEntries,
   upsertWeeklyResult,
 } from "@/lib/db";
 import { calculateWeekTaxes } from "@/lib/calc";
 import type { ManualLeague, WeekEntry } from "@/lib/types";
-import { ChevronLeft, Check, AlertCircle, ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronLeft, AlertCircle, ChevronDown, ChevronUp } from "lucide-react";
 
 // ─── Shared styles ────────────────────────────────────────────────────────────
 
-const selectCls =
-  "w-full bg-navy-900 border border-navy-700 focus:border-emerald-500/50 " +
-  "focus:ring-2 focus:ring-emerald-500/10 rounded-lg px-3.5 py-2.5 text-sm " +
-  "text-slate-100 outline-none transition-all appearance-none";
+const inputCls =
+  "w-full bg-white/5 border border-white/8 focus:border-emerald-500/40 " +
+  "rounded-xl px-3.5 py-2.5 text-sm " +
+  "text-white placeholder:text-slate-600 outline-none transition-colors tabular-nums";
 
-const labelCls = "block text-xs font-medium text-slate-500 uppercase tracking-wider mb-2";
-
-// ─── Team checkbox ────────────────────────────────────────────────────────────
-
-function TeamCheckbox({
-  name,
-  checked,
-  onChange,
-}: {
-  name: string;
-  checked: boolean;
-  onChange: (v: boolean) => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={() => onChange(!checked)}
-      className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg border transition-all text-left ${
-        checked
-          ? "bg-emerald-500/10 border-emerald-500/30 text-slate-100"
-          : "bg-navy-900 border-navy-700 text-slate-400 hover:border-navy-600 hover:text-slate-300"
-      }`}
-    >
-      <div
-        className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 transition-colors ${
-          checked ? "bg-emerald-500 border-emerald-500" : "border-navy-600"
-        }`}
-      >
-        {checked && <Check className="w-2.5 h-2.5 text-black" strokeWidth={3} />}
-      </div>
-      <span className="text-sm flex-1">{name}</span>
-    </button>
-  );
-}
+const labelCls = "block text-xs text-slate-500 mb-2";
 
 // ─── Inner form (uses useSearchParams — must be inside <Suspense>) ────────────
 
@@ -75,47 +42,41 @@ function WeekFormInner() {
   const [saveError, setSaveError] = useState("");
 
   // Form state
-  const [weekNumber,           setWeekNumber]           = useState<number>(1);
-  const [lowestScorer,         setLowestScorer]         = useState<string>("");
-  const [milestoneSelections,  setMilestoneSelections]  = useState<string[][]>([]);
+  const [weekNumber, setWeekNumber] = useState<number>(1);
+  const [scores,     setScores]     = useState<Record<string, string>>({});
 
   useEffect(() => {
     async function load() {
       const row = await getLeagueById(supabase, leagueId);
       if (!row) { setLoading(false); return; }
 
-      const [members, weekRows] = await Promise.all([
-        getMembers(supabase, leagueId),
+      const [teams, weekRows] = await Promise.all([
+        getManualTeams(supabase, leagueId),
         getWeeklyResults(supabase, leagueId),
       ]);
 
       // Commissioner check — redirect members
-      if (user) {
-        const myMember = members.find((m) => m.user_id === user.id);
-        if (!myMember || myMember.role !== "commissioner") {
-          router.replace(`/m/${leagueId}`);
-          return;
-        }
+      if (user && user.id !== row.commissioner_id) {
+        router.replace(`/m/${leagueId}`);
+        return;
       }
 
-      const manualLeague = leagueRowToManualLeague(row, members);
+      const manualLeague = manualTeamsToLeague(row, teams);
       const entries      = weeklyResultsToEntries(weekRows, leagueId);
       const defaultWeek  = editWeek ?? (entries[entries.length - 1]?.week ?? 0) + 1;
 
       setLeague(manualLeague);
       setWeekNumber(defaultWeek);
-      setMilestoneSelections(manualLeague.config.milestones.map(() => []));
 
       // Pre-fill when editing
       if (editWeek) {
         const existing = entries.find((e) => e.week === editWeek);
         if (existing) {
-          setLowestScorer(existing.lowestScorerTeamId);
-          setMilestoneSelections(
-            manualLeague.config.milestones.map((_, i) =>
-              existing.milestoneResults[i]?.qualifyingTeamIds ?? []
-            )
-          );
+          const prefill: Record<string, string> = {};
+          existing.scores.forEach(({ teamId, points }) => {
+            prefill[teamId] = String(points);
+          });
+          setScores(prefill);
         }
       }
 
@@ -124,52 +85,41 @@ function WeekFormInner() {
     load();
   }, [supabase, leagueId, editWeek, user, router]);
 
-  const toggleMilestoneTeam = useCallback(
-    (milestoneIdx: number, teamId: string) => {
-      setMilestoneSelections((prev) =>
-        prev.map((sel, i) => {
-          if (i !== milestoneIdx) return sel;
-          return sel.includes(teamId)
-            ? sel.filter((id) => id !== teamId)
-            : [...sel, teamId];
-        })
-      );
-    },
-    []
+  const allScoresEntered = useMemo(
+    () => !!league && league.teams.every((t) => scores[t.id]?.trim() !== "" && scores[t.id] !== undefined),
+    [league, scores]
   );
 
   const preview = useMemo(() => {
-    if (!league || !lowestScorer) return null;
+    if (!league || !allScoresEntered) return null;
     const entry: WeekEntry = {
       leagueId,
       week: weekNumber,
-      lowestScorerTeamId: lowestScorer,
-      milestoneResults: milestoneSelections.map((sel) => ({ qualifyingTeamIds: sel })),
+      scores: league.teams.map((t) => ({ teamId: t.id, points: Number(scores[t.id]) || 0 })),
       submittedAt: new Date().toISOString(),
     };
     return calculateWeekTaxes(entry, league);
-  }, [league, lowestScorer, weekNumber, milestoneSelections, leagueId]);
+  }, [league, allScoresEntered, scores, weekNumber, leagueId]);
 
   const previewTotal = preview?.reduce((s, c) => s + c.amount, 0) ?? 0;
 
   async function submit() {
-    if (!league || !lowestScorer) return;
+    if (!league || !allScoresEntered) return;
     setSaving(true);
     setSaveError("");
     try {
+      const entryScores = league.teams.map((t) => ({ teamId: t.id, points: Number(scores[t.id]) || 0 }));
       const entry: WeekEntry = {
         leagueId,
         week: weekNumber,
-        lowestScorerTeamId: lowestScorer,
-        milestoneResults: milestoneSelections.map((sel) => ({ qualifyingTeamIds: sel })),
+        scores: entryScores,
         submittedAt: new Date().toISOString(),
       };
       const taxes = calculateWeekTaxes(entry, league);
       await upsertWeeklyResult(supabase, {
         leagueId,
         week: weekNumber,
-        lowestScorerTeam: lowestScorer,
-        milestoneHits: milestoneSelections,
+        scores: entryScores,
         taxes,
       });
       router.push(`/m/${leagueId}`);
@@ -184,7 +134,7 @@ function WeekFormInner() {
   if (loading) {
     return (
       <div className="min-h-screen bg-navy-950 flex items-center justify-center">
-        <div className="w-6 h-6 border-2 border-navy-700 border-t-emerald-500 rounded-full animate-spin" />
+        <div className="w-6 h-6 border-2 border-white/6 border-t-emerald-500 rounded-full animate-spin" />
       </div>
     );
   }
@@ -200,6 +150,8 @@ function WeekFormInner() {
     );
   }
 
+  const bottomCount = Math.max(1, Math.min(league.config.bottomScorersCount, league.teams.length));
+
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
@@ -213,7 +165,7 @@ function WeekFormInner() {
           <ChevronLeft className="w-5 h-5" strokeWidth={1.5} />
         </Link>
         <div className="flex-1">
-          <p className="text-sm font-semibold text-slate-100">
+          <p className="text-sm font-semibold text-white">
             {editWeek ? `Edit week ${editWeek}` : `Week ${weekNumber}`}
           </p>
           <p className="text-xs text-slate-600">{league.name}</p>
@@ -230,17 +182,17 @@ function WeekFormInner() {
               <button
                 type="button"
                 onClick={() => setWeekNumber((n) => Math.max(1, n - 1))}
-                className="w-9 h-9 flex items-center justify-center rounded-lg bg-navy-800 border border-navy-700 hover:border-navy-600 text-slate-400 hover:text-slate-200 transition-colors"
+                className="w-9 h-9 flex items-center justify-center rounded-xl bg-[#0d1420] border border-white/6 hover:border-white/20 text-slate-400 hover:text-slate-200 transition-colors"
               >
                 <ChevronDown className="w-4 h-4" strokeWidth={1.5} />
               </button>
-              <p className="flex-1 text-center text-2xl font-bold text-slate-100 tabular-nums">
+              <p className="flex-1 text-center text-2xl font-bold text-white tabular-nums">
                 {weekNumber}
               </p>
               <button
                 type="button"
                 onClick={() => setWeekNumber((n) => n + 1)}
-                className="w-9 h-9 flex items-center justify-center rounded-lg bg-navy-800 border border-navy-700 hover:border-navy-600 text-slate-400 hover:text-slate-200 transition-colors"
+                className="w-9 h-9 flex items-center justify-center rounded-xl bg-[#0d1420] border border-white/6 hover:border-white/20 text-slate-400 hover:text-slate-200 transition-colors"
               >
                 <ChevronUp className="w-4 h-4" strokeWidth={1.5} />
               </button>
@@ -248,79 +200,47 @@ function WeekFormInner() {
           </div>
         )}
 
-        {/* ── Lowest scorer ── */}
+        {/* ── Team scores ── */}
         <div>
-          <label className={labelCls}>Lowest scorer this week</label>
-          <div className="relative">
-            <select
-              value={lowestScorer}
-              onChange={(e) => setLowestScorer(e.target.value)}
-              className={selectCls}
-            >
-              <option value="">Select a team</option>
-              {league.teams.map((team) => (
-                <option key={team.id} value={team.id}>
-                  {team.name}
-                </option>
-              ))}
-            </select>
-            <ChevronDown
-              className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-600 pointer-events-none"
-              strokeWidth={1.5}
-            />
-          </div>
-          <p className="text-xs text-slate-600 mt-1.5">
-            This team owes ${league.config.basePenalty} — always active, no exemptions.
+          <label className={labelCls}>Each team&apos;s score this week</label>
+          <p className="text-xs text-slate-600 mb-3">
+            The bottom {bottomCount} scorer{bottomCount > 1 ? "s" : ""} will each owe ${league.config.basePenalty.toLocaleString()}.
           </p>
-        </div>
-
-        {/* ── Milestones ── */}
-        {league.config.milestones.map((rule, i) => {
-          const label =
-            rule.type === "points"
-              ? `Points threshold (${rule.threshold}+ pts)`
-              : `Touchdown threshold (${rule.threshold}+ TDs)`;
-          const exemptNote = rule.exemptIfMultipleQualify
-            ? `If 2+ qualify, they're exempt — others pay $${rule.taxPerNonQualifier}.`
-            : `All non-qualifiers pay $${rule.taxPerNonQualifier}.`;
-
-          return (
-            <div key={i}>
-              <label className={labelCls}>{label}</label>
-              <p className="text-xs text-slate-600 mb-3">{exemptNote}</p>
-              <div className="space-y-2">
-                {league.teams.map((team) => (
-                  <TeamCheckbox
-                    key={team.id}
-                    name={team.name}
-                    checked={milestoneSelections[i]?.includes(team.id) ?? false}
-                    onChange={() => toggleMilestoneTeam(i, team.id)}
-                  />
-                ))}
+          <div className="space-y-2">
+            {league.teams.map((team) => (
+              <div key={team.id} className="flex items-center gap-3">
+                <span className="text-sm font-semibold text-white flex-1 truncate">{team.name}</span>
+                <input
+                  type="number"
+                  value={scores[team.id] ?? ""}
+                  onChange={(e) => setScores((prev) => ({ ...prev, [team.id]: e.target.value }))}
+                  onFocus={(e) => e.target.select()}
+                  placeholder="0"
+                  className={`${inputCls} w-24 text-right`}
+                  min={0}
+                  step="0.01"
+                />
               </div>
-              <p className="text-xs text-slate-600 mt-2">
-                Check all teams that <span className="text-slate-400">cleared</span> the threshold.
-              </p>
-            </div>
-          );
-        })}
+            ))}
+          </div>
+        </div>
 
         {/* ── Live preview ── */}
         {preview && (
           <div>
             <div className="flex items-center justify-between mb-2 px-1">
-              <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">
+              <p className="text-xs text-slate-500 uppercase tracking-widest">
                 This week&apos;s breakdown
               </p>
               <p className="text-xs font-semibold text-slate-400 tabular-nums">
-                +${previewTotal} to pot
+                +${previewTotal.toLocaleString()} to pot
               </p>
             </div>
-            <div className="bg-navy-800 border border-navy-700 rounded-xl overflow-hidden divide-y divide-navy-700">
+            <div className="bg-[#0d1420] border border-white/6 rounded-2xl overflow-hidden divide-y divide-white/6">
               {preview.map(({ teamId, teamName, amount, reasons }) => (
                 <div key={teamId} className="flex items-start gap-3 px-4 py-3">
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm text-slate-200">{teamName}</p>
+                    <p className="text-sm font-semibold text-white">{teamName}</p>
                     {reasons.length > 0 ? (
                       <p className="text-xs text-slate-600 mt-0.5 truncate">
                         {reasons.join(" · ")}
@@ -330,11 +250,11 @@ function WeekFormInner() {
                     )}
                   </div>
                   <p
-                    className={`text-sm font-semibold tabular-nums flex-shrink-0 ${
+                    className={`text-sm font-bold tabular-nums flex-shrink-0 ${
                       amount > 0 ? "text-red-400" : "text-slate-600"
                     }`}
                   >
-                    {amount > 0 ? `-$${amount}` : "—"}
+                    {amount > 0 ? `-$${amount.toLocaleString()}` : "—"}
                   </p>
                 </div>
               ))}
@@ -350,19 +270,19 @@ function WeekFormInner() {
           </div>
         )}
 
-        {/* ── Select prompt ── */}
-        {!lowestScorer && (
-          <div className="flex items-start gap-2.5 bg-navy-800 border border-navy-700 rounded-lg px-4 py-3">
+        {/* ── Incomplete prompt ── */}
+        {!allScoresEntered && (
+          <div className="flex items-start gap-2.5 bg-[#0d1420] border border-white/6 rounded-xl px-4 py-3">
             <AlertCircle className="w-4 h-4 text-slate-600 flex-shrink-0 mt-0.5" strokeWidth={1.5} />
-            <p className="text-xs text-slate-600">Select the lowest scorer to submit.</p>
+            <p className="text-xs text-slate-600">Enter every team&apos;s score to submit.</p>
           </div>
         )}
 
         <button
           type="button"
           onClick={submit}
-          disabled={!lowestScorer || saving}
-          className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold rounded-lg py-2.5 text-sm transition-colors"
+          disabled={!allScoresEntered || saving}
+          className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium rounded-xl py-2.5 text-sm transition-colors"
         >
           {saving ? (
             <>
@@ -386,7 +306,7 @@ export default function WeekFormPage() {
     <Suspense
       fallback={
         <div className="min-h-screen bg-navy-950 flex items-center justify-center">
-          <div className="w-6 h-6 border-2 border-navy-700 border-t-emerald-500 rounded-full animate-spin" />
+          <div className="w-6 h-6 border-2 border-white/6 border-t-emerald-500 rounded-full animate-spin" />
         </div>
       }
     >

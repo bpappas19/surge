@@ -7,8 +7,6 @@ import {
   getLeagueRosters,
   getLeagueUsers,
   getMatchups,
-  getWeekPlayerStats,
-  countPlayerTDs,
   getWinnersBracket,
   findChampionRosterId,
   avatarUrl,
@@ -16,14 +14,13 @@ import {
   SleeperLeagueUser,
   SleeperRoster,
   SleeperMatchup,
-  SleeperPlayerStats,
 } from "@/lib/sleeper";
 import { getSleeperSettings } from "@/lib/storage";
 import { getLeagueConfig, SleeperLeagueConfig } from "@/lib/supabase";
 import { createClient } from "@/lib/supabase-browser";
 import { getLeagueBySleeperLeagueId } from "@/lib/db";
 import { totalPot, calculateSeasonTaxes } from "@/lib/calc";
-import type { ManualLeague, WeekEntry, MilestoneRule } from "@/lib/types";
+import type { ManualLeague, WeekEntry } from "@/lib/types";
 import {
   ChevronLeft,
   Trophy,
@@ -45,38 +42,15 @@ interface TeamInfo {
 function buildWeekEntry(
   week: number,
   leagueId: string,
-  matchups: SleeperMatchup[],
-  milestones: MilestoneRule[],
-  playerStats: Record<string, SleeperPlayerStats>
+  matchups: SleeperMatchup[]
 ): WeekEntry | null {
   const valid = matchups.filter((m) => m.points > 0);
   if (!valid.length) return null;
 
-  const lowest = valid.reduce((min, m) => (m.points < min.points ? m : min));
-
-  const milestoneResults = milestones.map((rule) => {
-    let qualifyingTeamIds: string[];
-    if (rule.type === "points") {
-      qualifyingTeamIds = valid
-        .filter((m) => m.points >= rule.threshold)
-        .map((m) => String(m.roster_id));
-    } else {
-      qualifyingTeamIds = valid
-        .filter((m) =>
-          m.starters.some(
-            (playerId) => countPlayerTDs(playerStats[playerId]) >= rule.threshold
-          )
-        )
-        .map((m) => String(m.roster_id));
-    }
-    return { qualifyingTeamIds };
-  });
-
   return {
     leagueId,
     week,
-    lowestScorerTeamId: String(lowest.roster_id),
-    milestoneResults,
+    scores: valid.map((m) => ({ teamId: String(m.roster_id), points: m.points })),
     submittedAt: "",
   };
 }
@@ -103,7 +77,7 @@ function Avatar({
   }
   return (
     <div
-      className={`${dim} ${className} rounded-full bg-navy-700 flex items-center justify-center flex-shrink-0 font-semibold text-slate-500`}
+      className={`${dim} ${className} rounded-full bg-white/5 border border-white/6 flex items-center justify-center flex-shrink-0 font-semibold text-slate-500`}
     >
       {name.charAt(0).toUpperCase()}
     </div>
@@ -152,7 +126,7 @@ export default function PayoutsPage() {
           buy_in:       leagueRow.buy_in,
           team_count:   leagueRow.team_count,
           base_penalty: leagueRow.base_penalty,
-          milestones:   (leagueRow.milestones ?? []) as MilestoneRule[],
+          bottom_scorers_count: leagueRow.bottom_scorers_count ?? 1,
           created_at:   leagueRow.created_at,
         };
       } else if (legacyConfig) {
@@ -166,7 +140,7 @@ export default function PayoutsPage() {
             buy_in:       local.buyIn,
             team_count:   local.teamCount,
             base_penalty: 25,
-            milestones:   [],
+            bottom_scorers_count: 1,
           };
         }
       }
@@ -192,23 +166,11 @@ export default function PayoutsPage() {
       const weeksToFetch = Math.min(lastScored > 0 ? lastScored : maxRegular, maxRegular);
 
       if (weeksToFetch >= 1 && resolvedConfig) {
-        const weekNums       = Array.from({ length: weeksToFetch }, (_, i) => i + 1);
-        const hasTDMilestone = resolvedConfig.milestones.some((m) => m.type === "touchdowns");
+        const weekNums = Array.from({ length: weeksToFetch }, (_, i) => i + 1);
 
-        const [allMatchups, allPlayerStats] = await Promise.all([
-          Promise.all(weekNums.map((w) => getMatchups(leagueId, w).catch(() => []))),
-          hasTDMilestone
-            ? Promise.all(
-                weekNums.map((w) =>
-                  getWeekPlayerStats(leagueData.season, w).catch(
-                    (): Record<string, SleeperPlayerStats> => ({})
-                  )
-                )
-              )
-            : Promise.resolve(
-                weekNums.map((): Record<string, SleeperPlayerStats> => ({}))
-              ),
-        ]);
+        const allMatchups = await Promise.all(
+          weekNums.map((w) => getMatchups(leagueId, w).catch(() => []))
+        );
 
         const adaptedLeague: ManualLeague = {
           id:   leagueId,
@@ -219,7 +181,7 @@ export default function PayoutsPage() {
           })),
           config: {
             basePenalty: resolvedConfig.base_penalty,
-            milestones:  resolvedConfig.milestones,
+            bottomScorersCount: resolvedConfig.bottom_scorers_count ?? 1,
             buyIn:       resolvedConfig.buy_in,
           },
           createdAt: resolvedConfig.created_at ?? "",
@@ -227,13 +189,7 @@ export default function PayoutsPage() {
 
         const weekEntries: WeekEntry[] = [];
         allMatchups.forEach((matchups, i) => {
-          const entry = buildWeekEntry(
-            weekNums[i],
-            leagueId,
-            matchups,
-            resolvedConfig!.milestones,
-            allPlayerStats[i]
-          );
+          const entry = buildWeekEntry(weekNums[i], leagueId, matchups);
           if (entry) weekEntries.push(entry);
         });
 
@@ -273,7 +229,7 @@ export default function PayoutsPage() {
   if (loading) {
     return (
       <div className="min-h-[60vh] flex flex-col items-center justify-center gap-3">
-        <div className="w-7 h-7 border-2 border-navy-700 border-t-emerald-500 rounded-full animate-spin" />
+        <div className="w-7 h-7 border-2 border-white/6 border-t-emerald-500 rounded-full animate-spin" />
         <p className="text-slate-600 text-sm">Calculating payouts…</p>
       </div>
     );
@@ -284,7 +240,7 @@ export default function PayoutsPage() {
   if (error) {
     return (
       <div className="min-h-screen bg-navy-950 flex flex-col items-center justify-center gap-4 px-4">
-        <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-6 max-w-sm w-full text-center">
+        <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-6 max-w-sm w-full text-center">
           <AlertCircle className="w-7 h-7 text-red-400 mx-auto mb-3" strokeWidth={1.5} />
           <p className="text-red-400 text-sm">{error}</p>
           <button
@@ -305,7 +261,7 @@ export default function PayoutsPage() {
     <main className="min-h-screen bg-navy-950 pb-12">
 
       {/* Inline page header */}
-      <div className="w-full max-w-2xl mx-auto px-4 pt-5 pb-2 flex items-center gap-3">
+      <div className="w-full max-w-2xl mx-auto px-4 pt-5 pb-4 flex items-center gap-3 border-b border-white/6">
         <button
           onClick={() => router.back()}
           className="text-slate-500 hover:text-slate-300 transition-colors p-1 -ml-1 flex-shrink-0"
@@ -313,26 +269,29 @@ export default function PayoutsPage() {
           <ChevronLeft className="w-5 h-5" strokeWidth={1.5} />
         </button>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-slate-100">Payouts</p>
+          <p className="text-sm font-semibold text-white">Payouts</p>
           <p className="text-xs text-slate-600 truncate">{league?.name}</p>
         </div>
       </div>
 
-      <div className="w-full max-w-2xl mx-auto px-4 space-y-4">
+      <div className="w-full max-w-2xl mx-auto px-4 space-y-4 mt-1">
 
         {/* ── Champion card ── */}
         {champion ? (
-          <div className="bg-navy-800 border border-amber-500/25 rounded-xl overflow-hidden">
+          <div
+            className="border border-amber-500/20 rounded-2xl overflow-hidden"
+            style={{ background: "linear-gradient(135deg, rgba(245,158,11,0.08) 0%, transparent 70%)" }}
+          >
             {/* Label row */}
-            <div className="flex items-center gap-2 px-4 pt-4 pb-2">
+            <div className="flex items-center gap-2 px-5 pt-5 pb-2">
               <Trophy className="w-4 h-4 text-amber-400" strokeWidth={1.5} />
-              <p className="text-xs font-semibold text-amber-400 uppercase tracking-wider">
+              <p className="text-amber-400 text-xs font-bold uppercase tracking-widest">
                 {league?.season} Champion
               </p>
             </div>
 
             {/* Champion identity */}
-            <div className="flex items-center gap-3 px-4 pb-4">
+            <div className="flex items-center gap-3 px-5 pb-4">
               <Avatar
                 src={avatarUrl(champion.avatar)}
                 name={champion.displayName}
@@ -340,31 +299,31 @@ export default function PayoutsPage() {
                 className="border-2 border-amber-500/25"
               />
               <div>
-                <p className="text-lg font-bold text-slate-100">{champion.teamName}</p>
+                <p className="text-2xl font-bold text-white">{champion.teamName}</p>
                 <p className="text-sm text-slate-500">{champion.displayName}</p>
               </div>
             </div>
 
             {/* Prize breakdown */}
-            <div className="border-t border-navy-700 px-4 py-3.5 grid grid-cols-3 gap-3">
+            <div className="border-t border-white/6 px-5 py-4 grid grid-cols-3 gap-3">
               <div>
-                <p className="text-[10px] text-slate-600 uppercase tracking-wider mb-0.5">Pot</p>
-                <p className="text-xl font-bold text-slate-100 tabular-nums">${potTotal}</p>
+                <p className="text-xs text-slate-500 mb-0.5">Pot</p>
+                <p className="text-2xl font-bold text-white tabular-nums">${potTotal.toLocaleString()}</p>
               </div>
               <div>
-                <p className="text-[10px] text-slate-600 uppercase tracking-wider mb-0.5">Own debt</p>
-                <p className="text-xl font-bold text-red-400 tabular-nums">
-                  {champDebt > 0 ? `-$${champDebt}` : "—"}
+                <p className="text-xs text-slate-500 mb-0.5">Own debt</p>
+                <p className="text-2xl font-bold text-red-400 tabular-nums">
+                  {champDebt > 0 ? `-$${champDebt.toLocaleString()}` : "—"}
                 </p>
               </div>
               <div>
-                <p className="text-[10px] text-emerald-600 uppercase tracking-wider mb-0.5">Receives</p>
-                <p className="text-xl font-bold text-emerald-400 tabular-nums">${champPrize}</p>
+                <p className="text-xs text-slate-500 mb-0.5">Receives</p>
+                <p className="text-2xl font-bold text-emerald-400 tabular-nums">${champPrize.toLocaleString()}</p>
               </div>
             </div>
           </div>
         ) : (
-          <div className="bg-navy-800 border border-navy-700 rounded-xl p-6 text-center">
+          <div className="bg-[#0d1420] border border-white/6 rounded-2xl p-6 text-center">
             <Trophy className="w-7 h-7 text-slate-700 mx-auto mb-2" strokeWidth={1.5} />
             <p className="text-sm text-slate-500 font-medium">Champion not determined</p>
             <p className="text-xs text-slate-700 mt-1">Check back when the season is complete</p>
@@ -372,35 +331,35 @@ export default function PayoutsPage() {
         )}
 
         {/* ── Pot summary ── */}
-        <div className="bg-navy-800 border border-navy-700 rounded-xl px-4 py-4 space-y-2.5">
-          <p className="text-xs font-medium text-slate-600 uppercase tracking-wider">Pot breakdown</p>
+        <div className="bg-[#0d1420] border border-white/6 rounded-2xl px-5 py-4 space-y-2.5">
+          <p className="text-xs text-slate-500 uppercase tracking-widest">Pot breakdown</p>
           {startingPot > 0 && (
             <div className="flex items-center justify-between text-sm">
               <span className="text-slate-500">Starting pot</span>
-              <span className="font-semibold text-slate-100 tabular-nums">${startingPot.toLocaleString()}</span>
+              <span className="font-bold text-white tabular-nums">${startingPot.toLocaleString()}</span>
             </div>
           )}
           <div className="flex items-center justify-between text-sm">
             <span className="text-slate-500">Surge penalties</span>
-            <span className="font-semibold text-slate-100 tabular-nums">${surgeTotal.toLocaleString()}</span>
+            <span className="font-bold text-white tabular-nums">${surgeTotal.toLocaleString()}</span>
           </div>
-          <div className="flex items-center justify-between text-sm pt-2.5 border-t border-navy-700">
-            <span className="font-semibold text-slate-200">Total pot</span>
-            <span className="font-bold text-emerald-400 tabular-nums">${potTotal.toLocaleString()}</span>
+          <div className="flex items-center justify-between text-sm pt-2.5 border-t border-white/6">
+            <span className="font-semibold text-white">Total pot</span>
+            <span className="font-bold text-white tabular-nums">${potTotal.toLocaleString()}</span>
           </div>
         </div>
 
         {/* ── Who owes what ── */}
         <section>
-          <p className="text-xs font-medium text-slate-600 uppercase tracking-wider mb-2 px-1">
+          <p className="text-xs text-slate-500 uppercase tracking-widest mb-2 px-1">
             Who owes what
           </p>
-          <div className="bg-navy-800 border border-navy-700 rounded-xl overflow-hidden divide-y divide-navy-700">
+          <div className="bg-[#0d1420] border border-white/6 rounded-2xl overflow-hidden divide-y divide-white/6">
             {payouts.map(({ team, owes }) => (
-              <div key={team.rosterId} className="flex items-center gap-3 px-4 py-3.5">
+              <div key={team.rosterId} className="flex items-center gap-3 px-4 py-4 hover:bg-white/3 transition-colors">
                 <Avatar src={avatarUrl(team.avatar)} name={team.displayName} />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-slate-100 truncate">{team.teamName}</p>
+                  <p className="text-sm font-semibold text-white truncate">{team.teamName}</p>
                   {owes > 0 && champion ? (
                     <p className="text-xs text-slate-600 mt-0.5 truncate">
                       owes{" "}
@@ -414,8 +373,8 @@ export default function PayoutsPage() {
                   )}
                 </div>
                 {owes > 0 ? (
-                  <span className="bg-red-500/10 border border-red-500/20 text-red-400 font-semibold text-sm px-2.5 py-1 rounded-lg flex-shrink-0 tabular-nums">
-                    ${owes}
+                  <span className="text-red-400 font-bold text-sm flex-shrink-0 tabular-nums">
+                    ${owes.toLocaleString()}
                   </span>
                 ) : (
                   <span className="text-slate-600 text-sm flex-shrink-0">—</span>
@@ -425,7 +384,7 @@ export default function PayoutsPage() {
 
             {/* Champion's own row if they owed */}
             {champion && champDebt > 0 && (
-              <div className="flex items-center gap-3 px-4 py-3.5 bg-amber-500/5">
+              <div className="flex items-center gap-3 px-4 py-4 bg-amber-500/5 hover:bg-amber-500/8 transition-colors">
                 <Avatar
                   src={avatarUrl(champion.avatar)}
                   name={champion.displayName}
@@ -433,15 +392,15 @@ export default function PayoutsPage() {
                 />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <p className="text-sm font-medium text-slate-100 truncate">{champion.teamName}</p>
-                    <span className="text-[10px] bg-amber-500/15 text-amber-400 border border-amber-500/25 rounded px-1.5 py-0.5 font-semibold uppercase tracking-wide">
+                    <p className="text-sm font-semibold text-white truncate">{champion.teamName}</p>
+                    <span className="text-[10px] font-bold tracking-wide px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-400 border border-amber-500/20">
                       Champ
                     </span>
                   </div>
                   <p className="text-xs text-slate-600 mt-0.5">Deducted from prize</p>
                 </div>
-                <span className="text-amber-400/70 font-semibold text-sm flex-shrink-0 tabular-nums">
-                  −${champDebt}
+                <span className="text-amber-400/70 font-bold text-sm flex-shrink-0 tabular-nums">
+                  −${champDebt.toLocaleString()}
                 </span>
               </div>
             )}
@@ -449,14 +408,15 @@ export default function PayoutsPage() {
         </section>
 
         {/* ── Rules note ── */}
-        <div className="bg-navy-800 border border-navy-700 rounded-xl px-4 py-4">
-          <p className="text-xs font-medium text-slate-600 uppercase tracking-wider mb-2.5">
+        <div className="bg-[#0d1420] border border-white/6 rounded-2xl px-5 py-4">
+          <p className="text-xs text-slate-500 uppercase tracking-widest mb-2.5">
             How it works
           </p>
           <ul className="space-y-1.5 text-xs text-slate-500 leading-relaxed">
             <li>
-              Lowest scorer each week owes{" "}
-              <span className="text-slate-300">${config?.base_penalty ?? 25}</span> to the pot
+              Bottom <span className="text-slate-300">{config?.bottom_scorers_count ?? 1}</span>{" "}
+              scorer{(config?.bottom_scorers_count ?? 1) > 1 ? "s" : ""} each week owe{" "}
+              <span className="text-slate-300">${(config?.base_penalty ?? 25).toLocaleString()}</span> to the pot
             </li>
             <li>League champion collects the entire pot at season end</li>
             <li>Champion&apos;s own taxes are deducted from their prize</li>

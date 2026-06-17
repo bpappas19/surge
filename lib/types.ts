@@ -3,6 +3,8 @@
 export interface Team {
   id: string;       // crypto.randomUUID()
   name: string;     // e.g. "Chasing Mahomes"
+  /** User id of the member who has claimed this team, if any (manual leagues). */
+  claimedByUserId?: string | null;
 }
 
 /** A single scoring milestone (points or touchdowns). */
@@ -20,12 +22,14 @@ export interface MilestoneRule {
 }
 
 export interface LeagueConfig {
-  /** Lowest-scorer penalty, always active. Default: 25. */
+  /** Amount each bottom scorer pays into the pot per week. Default: 25. */
   basePenalty: number;
-  /** 0, 1, or 2 optional milestone rules. */
-  milestones: MilestoneRule[];
+  /** How many bottom scorers pay each week (1-6, or "bottom half"). */
+  bottomScorersCount: number;
   /** Buy-in per team in dollars — sets the baseline starting pot. */
   buyIn?: number;
+  /** @deprecated Kept for backward compatibility — no longer used. */
+  milestones?: MilestoneRule[];
 }
 
 export interface ManualLeague {
@@ -43,15 +47,8 @@ export interface ManualLeague {
 export interface WeekEntry {
   leagueId: string;
   week: number;
-  /** Team that scored lowest this week. */
-  lowestScorerTeamId: string;
-  /**
-   * One record per milestone in league.config.milestones (same index order).
-   * qualifyingTeamIds: teams that CLEARED the milestone threshold.
-   */
-  milestoneResults: {
-    qualifyingTeamIds: string[];
-  }[];
+  /** Each team's score for this week. */
+  scores: { teamId: string; points: number }[];
   submittedAt: string; // ISO
 }
 

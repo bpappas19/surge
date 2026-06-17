@@ -8,8 +8,8 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database, LeagueRow, MemberRow, WeeklyRow } from "./database.types";
-import type { MilestoneRule, ManualLeague, WeekEntry, TeamWeekCharge } from "./types";
+import type { Database, LeagueRow, MemberRow, WeeklyRow, ManualTeamRow } from "./database.types";
+import type { ManualLeague, WeekEntry, TeamWeekCharge } from "./types";
 
 type DB = SupabaseClient<Database>;
 
@@ -23,7 +23,7 @@ export async function createLeague(
     buyIn: number;
     teamCount: number;
     basePenalty: number;
-    milestones: MilestoneRule[];
+    bottomScorersCount: number;
     mode: "manual" | "sleeper";
     sleeperLeagueId?: string;
     commissionerId: string;
@@ -39,7 +39,7 @@ export async function createLeague(
       surge_deposit: 0,
       team_count: data.teamCount,
       base_penalty: data.basePenalty,
-      milestones: data.milestones as Database["public"]["Tables"]["leagues"]["Insert"]["milestones"],
+      bottom_scorers_count: data.bottomScorersCount,
       mode: data.mode,
       sleeper_league_id: data.sleeperLeagueId ?? null,
       commissioner_id: data.commissionerId,
@@ -95,19 +95,11 @@ export async function getLeagueBySleeperLeagueId(
 export async function updateLeague(
   db: DB,
   id: string,
-  patch: Partial<Pick<LeagueRow, "champion_team_id" | "base_penalty" | "buy_in" | "season" | "total_weeks">> & {
-    milestones?: MilestoneRule[];
-  }
+  patch: Partial<Pick<LeagueRow, "champion_team_id" | "base_penalty" | "bottom_scorers_count" | "buy_in" | "season" | "total_weeks" | "team_count">>
 ): Promise<void> {
-  const { milestones, ...rest } = patch;
-  type LeagueUpdate = Database["public"]["Tables"]["leagues"]["Update"];
-  const update: LeagueUpdate = { ...rest };
-  if (milestones !== undefined) {
-    update.milestones = milestones as LeagueUpdate["milestones"];
-  }
   const { error } = await db
     .from("leagues")
-    .update(update)
+    .update(patch)
     .eq("id", id);
   if (error) console.error("[Surge] updateLeague:", error.message);
 }
@@ -200,6 +192,75 @@ export async function updateMemberStripeCustomer(
   if (error) console.error("[Surge] updateMemberStripeCustomer:", error.message);
 }
 
+// ─── Manual teams ─────────────────────────────────────────────────────────────
+
+/**
+ * Creates one manual_teams row per team name, in order, all unclaimed.
+ * Called once at league launch with the names the commissioner entered.
+ */
+export async function addManualTeams(
+  db: DB,
+  leagueId: string,
+  teamNames: string[]
+): Promise<ManualTeamRow[]> {
+  const { data, error } = await db
+    .from("manual_teams")
+    .insert(teamNames.map((teamName) => ({ league_id: leagueId, team_name: teamName })))
+    .select();
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+export async function getManualTeams(
+  db: DB,
+  leagueId: string
+): Promise<ManualTeamRow[]> {
+  const { data, error } = await db
+    .from("manual_teams")
+    .select("*")
+    .eq("league_id", leagueId)
+    .order("joined_at", { ascending: true });
+  if (error) return [];
+  return data ?? [];
+}
+
+/**
+ * Claims an unclaimed team for a user. Fails (returns null) if the team
+ * has already been claimed by someone else.
+ */
+export async function claimManualTeam(
+  db: DB,
+  teamId: string,
+  userId: string
+): Promise<ManualTeamRow | null> {
+  const { data, error } = await db
+    .from("manual_teams")
+    .update({ claimed_by_user_id: userId })
+    .eq("id", teamId)
+    .is("claimed_by_user_id", null)
+    .select()
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function updateManualTeam(
+  db: DB,
+  teamId: string,
+  teamName: string
+): Promise<void> {
+  const { error } = await db
+    .from("manual_teams")
+    .update({ team_name: teamName })
+    .eq("id", teamId);
+  if (error) throw new Error(error.message);
+}
+
+export async function deleteManualTeam(db: DB, teamId: string): Promise<void> {
+  const { error } = await db.from("manual_teams").delete().eq("id", teamId);
+  if (error) throw new Error(error.message);
+}
+
 // ─── Weekly results ──────────────────────────────────────────────────────────
 
 export async function upsertWeeklyResult(
@@ -207,8 +268,7 @@ export async function upsertWeeklyResult(
   data: {
     leagueId: string;
     week: number;
-    lowestScorerTeam: string;
-    milestoneHits: string[][];
+    scores: { teamId: string; points: number }[];
     taxes: TeamWeekCharge[];
   }
 ): Promise<void> {
@@ -222,8 +282,7 @@ export async function upsertWeeklyResult(
   const { error } = await db.from("weekly_results").insert({
     league_id: data.leagueId,
     week: data.week,
-    lowest_scorer_team: data.lowestScorerTeam,
-    milestone_hits: data.milestoneHits as Database["public"]["Tables"]["weekly_results"]["Insert"]["milestone_hits"],
+    scores: data.scores as Database["public"]["Tables"]["weekly_results"]["Insert"]["scores"],
     taxes: data.taxes as Database["public"]["Tables"]["weekly_results"]["Insert"]["taxes"],
   });
   if (error) throw new Error(error.message);
@@ -258,7 +317,34 @@ export function leagueRowToManualLeague(
     teams: members.map((m) => ({ id: m.id, name: m.team_name })),
     config: {
       basePenalty: row.base_penalty,
-      milestones: (row.milestones ?? []) as MilestoneRule[],
+      bottomScorersCount: row.bottom_scorers_count ?? 1,
+      buyIn: row.buy_in,
+    },
+    championTeamId: row.champion_team_id ?? undefined,
+    createdAt: row.created_at,
+  };
+}
+
+/**
+ * Reconstructs a ManualLeague from manual_teams rows.
+ * Team IDs = manual_teams.id — the team list is fixed at launch and
+ * independent of which members have claimed a team so far.
+ */
+export function manualTeamsToLeague(
+  row: LeagueRow,
+  teams: ManualTeamRow[]
+): ManualLeague {
+  return {
+    id: row.id,
+    name: row.name,
+    teams: teams.map((t) => ({
+      id: t.id,
+      name: t.team_name,
+      claimedByUserId: t.claimed_by_user_id,
+    })),
+    config: {
+      basePenalty: row.base_penalty,
+      bottomScorersCount: row.bottom_scorers_count ?? 1,
       buyIn: row.buy_in,
     },
     championTeamId: row.champion_team_id ?? undefined,
@@ -268,24 +354,20 @@ export function leagueRowToManualLeague(
 
 /**
  * Reconstructs WeekEntry[] from WeeklyRow[].
- * lowestScorerTeamId maps to league_members.id for manual leagues,
+ * Team ids in `scores` map to league_members.id for manual leagues,
  * or Sleeper roster_id string for Sleeper leagues.
  */
 export function weeklyResultsToEntries(
   rows: WeeklyRow[],
   leagueId: string
 ): WeekEntry[] {
-  return rows.map((row) => {
-    const hits = (row.milestone_hits ?? []) as string[][];
-    return {
-      leagueId,
-      week: row.week,
-      lowestScorerTeamId: row.lowest_scorer_team,
-      milestoneResults: hits.map((qualifyingTeamIds) => ({ qualifyingTeamIds })),
-      submittedAt: row.created_at,
-    };
-  });
+  return rows.map((row) => ({
+    leagueId,
+    week: row.week,
+    scores: (row.scores ?? []) as { teamId: string; points: number }[],
+    submittedAt: row.created_at,
+  }));
 }
 
 // Re-export row types for convenience
-export type { LeagueRow, MemberRow, WeeklyRow };
+export type { LeagueRow, MemberRow, WeeklyRow, ManualTeamRow };

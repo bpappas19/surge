@@ -11,7 +11,9 @@ export interface SleeperLeagueConfig {
   buy_in: number;
   team_count: number;
   base_penalty: number;
-  milestones: MilestoneRule[];
+  bottom_scorers_count?: number;
+  /** @deprecated Kept for backward compatibility — no longer used. */
+  milestones?: MilestoneRule[];
   created_at?: string;
   updated_at?: string;
 }

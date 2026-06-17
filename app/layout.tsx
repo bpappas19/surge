@@ -44,8 +44,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <AuthProvider initialSession={initialSession}>
           {/* Fixed nav — appears on every page */}
           <NavBar />
-          {/* Spacer so content starts below the 56px nav */}
-          <div className="pt-14">
+          {/* Spacer so content starts below the 64px nav */}
+          <div className="pt-16">
             {children}
           </div>
         </AuthProvider>

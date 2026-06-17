@@ -9,10 +9,9 @@ import {
   getMember,
   updateLeague,
 } from "@/lib/db";
-import type { MilestoneRule } from "@/lib/types";
+import { BottomScorersSelector, PotGrowthPreview } from "@/components/PotRules";
 import {
   ChevronLeft,
-  Check,
   TrendingDown,
   AlertCircle,
   CheckCircle2,
@@ -21,9 +20,9 @@ import {
 // ─── Design tokens ─────────────────────────────────────────────────────────
 
 const inputCls =
-  "bg-navy-900 border border-navy-700 focus:border-teal-500/40 " +
-  "rounded-lg px-3.5 py-2.5 text-sm " +
-  "text-slate-100 placeholder:text-slate-600 outline-none transition-colors w-full";
+  "bg-white/5 border border-white/8 focus:border-emerald-500/40 " +
+  "rounded-xl px-3.5 py-2.5 text-sm " +
+  "text-white placeholder:text-slate-600 outline-none transition-colors w-full";
 
 const labelCls = "block text-sm text-slate-400 mb-2";
 
@@ -31,148 +30,7 @@ const primaryBtnCls =
   "w-full flex items-center justify-center gap-2 " +
   "bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 " +
   "disabled:opacity-40 disabled:cursor-not-allowed " +
-  "text-white font-semibold rounded-lg py-3 text-sm transition-colors";
-
-// ─── MilestoneDraft ─────────────────────────────────────────────────────────
-
-interface MilestoneDraft {
-  enabled: boolean;
-  threshold: number;
-  taxAmount: number;
-  exemptIfMultipleQualify: boolean;
-}
-
-function draftFromRule(rule: MilestoneRule): MilestoneDraft {
-  return {
-    enabled: true,
-    threshold: rule.threshold,
-    taxAmount: rule.taxPerNonQualifier,
-    exemptIfMultipleQualify: rule.exemptIfMultipleQualify,
-  };
-}
-
-// ─── MilestoneCard ──────────────────────────────────────────────────────────
-
-function MilestoneCard({
-  title,
-  unit,
-  description,
-  value,
-  onChange,
-}: {
-  title: string;
-  unit: string;
-  description: string;
-  value: MilestoneDraft;
-  onChange: (v: MilestoneDraft) => void;
-}) {
-  return (
-    <div
-      className={`bg-navy-800 border rounded-xl overflow-hidden transition-colors duration-200 ${
-        value.enabled ? "border-teal-500/30" : "border-navy-700"
-      }`}
-    >
-      <div className="flex items-start justify-between px-5 py-4 gap-3">
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-slate-200">{title}</p>
-          <p className="text-xs text-slate-600 mt-0.5 leading-relaxed">
-            {description}
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => onChange({ ...value, enabled: !value.enabled })}
-          className={`relative w-10 h-6 rounded-full transition-colors duration-200 flex-shrink-0 mt-0.5 ${
-            value.enabled ? "bg-emerald-500" : "bg-navy-600"
-          }`}
-          aria-checked={value.enabled}
-          role="switch"
-        >
-          <span
-            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${
-              value.enabled ? "translate-x-4" : "translate-x-0"
-            }`}
-          />
-        </button>
-      </div>
-
-      {value.enabled && (
-        <div className="border-t border-navy-700 px-5 pt-5 pb-5 space-y-5">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className={labelCls}>Threshold</label>
-              <div className="relative">
-                <input
-                  type="number"
-                  value={value.threshold === 0 ? "" : value.threshold}
-                  onChange={(e) =>
-                    onChange({ ...value, threshold: Number(e.target.value) })
-                  }
-                  onFocus={(e) => e.target.select()}
-                  className={inputCls}
-                  min={0}
-                />
-                <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs text-slate-600 pointer-events-none">
-                  {unit}
-                </span>
-              </div>
-            </div>
-            <div>
-              <label className={labelCls}>Tax per team</label>
-              <div className="relative">
-                <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs text-slate-600 pointer-events-none">
-                  $
-                </span>
-                <input
-                  type="number"
-                  value={value.taxAmount === 0 ? "" : value.taxAmount}
-                  onChange={(e) =>
-                    onChange({ ...value, taxAmount: Number(e.target.value) })
-                  }
-                  onFocus={(e) => e.target.select()}
-                  className={`${inputCls} pl-6`}
-                  min={0}
-                />
-              </div>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={() =>
-              onChange({
-                ...value,
-                exemptIfMultipleQualify: !value.exemptIfMultipleQualify,
-              })
-            }
-            className="flex items-start gap-3 text-left w-full group"
-          >
-            <div
-              className={`mt-0.5 w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 transition-colors ${
-                value.exemptIfMultipleQualify
-                  ? "bg-emerald-500 border-emerald-500"
-                  : "border-navy-600 group-hover:border-navy-500"
-              }`}
-            >
-              {value.exemptIfMultipleQualify && (
-                <Check className="w-2.5 h-2.5 text-black" strokeWidth={3} />
-              )}
-            </div>
-            <div>
-              <p className="text-sm text-slate-300 leading-snug">
-                Multiple teams can win the same milestone
-              </p>
-              <p className="text-xs text-slate-600 mt-0.5 leading-relaxed">
-                If 2+ teams hit this milestone, they&apos;re both exempt from
-                paying — everyone else still pays into the pot
-              </p>
-            </div>
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
+  "text-white font-medium rounded-xl py-2.5 text-sm transition-colors";
 
 // ─── Page ───────────────────────────────────────────────────────────────────
 
@@ -196,18 +54,9 @@ export default function SleeperLeagueEditPage() {
   // Form state
   const [buyIn, setBuyIn] = useState("");
   const [basePenalty, setBasePenalty] = useState(25);
-  const [pointsMilestone, setPointsMilestone] = useState<MilestoneDraft>({
-    enabled: false,
-    threshold: 130,
-    taxAmount: 10,
-    exemptIfMultipleQualify: true,
-  });
-  const [tdMilestone, setTdMilestone] = useState<MilestoneDraft>({
-    enabled: false,
-    threshold: 3,
-    taxAmount: 10,
-    exemptIfMultipleQualify: true,
-  });
+  const [bottomScorersCount, setBottomScorersCount] = useState(1);
+  const [teamCount, setTeamCount] = useState(0);
+  const [totalWeeks, setTotalWeeks] = useState(14);
 
   useEffect(() => {
     if (authLoading) return;
@@ -239,12 +88,9 @@ export default function SleeperLeagueEditPage() {
       setSeason(row.season ?? "");
       setBuyIn(String(row.buy_in));
       setBasePenalty(row.base_penalty);
-
-      const milestones = (row.milestones ?? []) as MilestoneRule[];
-      const ptRule = milestones.find((m) => m.type === "points");
-      const tdRule = milestones.find((m) => m.type === "touchdowns");
-      if (ptRule) setPointsMilestone(draftFromRule(ptRule));
-      if (tdRule) setTdMilestone(draftFromRule(tdRule));
+      setBottomScorersCount(row.bottom_scorers_count ?? 1);
+      setTeamCount(row.team_count);
+      setTotalWeeks(row.total_weeks ?? 14);
 
       setLoading(false);
     }
@@ -258,29 +104,11 @@ export default function SleeperLeagueEditPage() {
     setSaved(false);
     setSaveError("");
 
-    const milestones: MilestoneRule[] = [];
-    if (pointsMilestone.enabled) {
-      milestones.push({
-        type: "points",
-        threshold: pointsMilestone.threshold,
-        taxPerNonQualifier: pointsMilestone.taxAmount,
-        exemptIfMultipleQualify: pointsMilestone.exemptIfMultipleQualify,
-      });
-    }
-    if (tdMilestone.enabled) {
-      milestones.push({
-        type: "touchdowns",
-        threshold: tdMilestone.threshold,
-        taxPerNonQualifier: tdMilestone.taxAmount,
-        exemptIfMultipleQualify: tdMilestone.exemptIfMultipleQualify,
-      });
-    }
-
     try {
       await updateLeague(supabase, supabaseLeagueId, {
         buy_in: Number(buyIn),
         base_penalty: basePenalty,
-        milestones,
+        bottom_scorers_count: bottomScorersCount,
       });
       setSaved(true);
       // Bust the Next.js router cache so the dashboard re-fetches config
@@ -301,7 +129,7 @@ export default function SleeperLeagueEditPage() {
   if (authLoading || loading) {
     return (
       <div className="min-h-screen bg-navy-950 flex items-center justify-center">
-        <div className="w-6 h-6 border-2 border-navy-700 border-t-emerald-500 rounded-full animate-spin" />
+        <div className="w-6 h-6 border-2 border-white/6 border-t-emerald-500 rounded-full animate-spin" />
       </div>
     );
   }
@@ -321,10 +149,10 @@ export default function SleeperLeagueEditPage() {
         </button>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <p className="text-sm font-semibold text-slate-100 truncate">
+            <p className="text-sm font-semibold text-white truncate">
               {leagueName}
             </p>
-            <span className="flex-shrink-0 text-[10px] font-semibold uppercase tracking-wide bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 rounded px-1.5 py-0.5">
+            <span className="flex-shrink-0 text-[10px] font-bold tracking-wide bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 rounded-md px-2 py-0.5">
               Commissioner
             </span>
           </div>
@@ -359,8 +187,8 @@ export default function SleeperLeagueEditPage() {
         )}
 
         {/* Buy-in */}
-        <div className="bg-navy-800 border border-navy-700 rounded-xl px-5 py-5 space-y-4">
-          <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">
+        <div className="bg-[#0d1420] border border-white/6 rounded-2xl p-5 sm:p-6 space-y-4">
+          <p className="text-xs text-slate-500 uppercase tracking-widest">
             League financials
           </p>
           <div>
@@ -382,18 +210,18 @@ export default function SleeperLeagueEditPage() {
         </div>
 
         {/* Base penalty */}
-        <div className="bg-navy-800 border border-navy-700 rounded-xl px-5 py-5">
+        <div className="bg-[#0d1420] border border-white/6 rounded-2xl p-5 sm:p-6">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2.5">
               <TrendingDown className="w-4 h-4 text-slate-500" strokeWidth={1.5} />
-              <p className="text-sm font-medium text-slate-200">
-                Lowest scorer penalty
+              <p className="text-sm font-semibold text-white">
+                Bottom scorer penalty
               </p>
             </div>
             <span className="text-xs text-slate-600">Always active</span>
           </div>
           <div className="flex items-center gap-3">
-            <span className="text-sm text-slate-500">Owes</span>
+            <span className="text-sm text-slate-500">Each owes</span>
             <div className="relative w-24">
               <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs text-slate-600 pointer-events-none">
                 $
@@ -413,22 +241,15 @@ export default function SleeperLeagueEditPage() {
           </div>
         </div>
 
-        {/* Milestone cards */}
-        <MilestoneCard
-          title="Points threshold"
-          unit="pts"
-          description="If a team scores X+ points, everyone else pays"
-          value={pointsMilestone}
-          onChange={setPointsMilestone}
-        />
+        {/* Bottom scorers count */}
+        <div className="bg-[#0d1420] border border-white/6 rounded-2xl p-5 sm:p-6">
+          <p className="text-sm font-semibold text-white mb-1">How many teams pay each week?</p>
+          <p className="text-xs text-slate-600 mb-4">The lowest-scoring teams each week pay into the pot.</p>
+          <BottomScorersSelector value={bottomScorersCount} onChange={setBottomScorersCount} teamCount={teamCount} />
+        </div>
 
-        <MilestoneCard
-          title="Touchdown threshold"
-          unit="TDs"
-          description="If a team has a player with X+ anytime TDs (rush or rec), everyone else pays"
-          value={tdMilestone}
-          onChange={setTdMilestone}
-        />
+        {/* Live preview */}
+        <PotGrowthPreview bottomScorersCount={bottomScorersCount} basePenalty={basePenalty} totalWeeks={totalWeeks} />
 
         {/* Save */}
         <button

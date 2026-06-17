@@ -8,14 +8,14 @@ import { createClient } from "@/lib/supabase-browser";
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
 const inputCls =
-  "w-full bg-navy-900 border border-navy-700 focus:border-teal-500/40 " +
-  "rounded-lg px-3.5 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 " +
+  "w-full bg-white/5 border border-white/8 focus:border-emerald-500/40 " +
+  "rounded-xl px-3.5 py-2.5 text-sm text-white placeholder:text-slate-600 " +
   "outline-none transition-colors";
 
 const primaryBtnCls =
   "w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 " +
   "active:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed " +
-  "text-white font-medium rounded-lg py-2.5 text-sm transition-colors";
+  "text-white font-semibold rounded-xl py-2.5 text-sm transition-colors";
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
@@ -65,17 +65,17 @@ export default function ResetPasswordPage() {
   return (
     <main
       className="bg-navy-950 flex flex-col items-center px-4 pb-12 pt-[12vh]"
-      style={{ minHeight: "calc(100vh - 56px)" }}
+      style={{ minHeight: "calc(100vh - 64px)" }}
     >
-      <div className="w-full max-w-sm bg-navy-800 border border-navy-700 rounded-2xl overflow-hidden">
+      <div className="w-full max-w-sm bg-[#0d1420] border border-white/6 rounded-2xl shadow-2xl shadow-black/40 overflow-hidden">
 
         {/* Header */}
-        <div className="px-8 pt-8 pb-6 border-b border-navy-700">
+        <div className="px-8 pt-8 pb-6 border-b border-white/6">
           <div className="flex items-center gap-2 mb-5">
             <Zap className="w-5 h-5 text-emerald-400" fill="currentColor" strokeWidth={0} />
             <span className="text-sm font-bold text-white tracking-tight">Surge</span>
           </div>
-          <p className="text-base font-semibold text-slate-100">Set new password</p>
+          <p className="text-base font-semibold text-white">Set new password</p>
           <p className="text-xs text-slate-500 mt-1">Choose a password for your account</p>
         </div>
 

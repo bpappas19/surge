@@ -1,12 +1,13 @@
 import { Zap } from "lucide-react";
 
-type Size = "xs" | "sm" | "md" | "lg";
+type Size = "xs" | "sm" | "nav" | "md" | "lg";
 
 const sizes: Record<Size, { zap: string; text: string; gap: string }> = {
-  xs: { zap: "w-3.5 h-3.5", text: "text-sm   font-bold tracking-[-0.02em]", gap: "gap-1.5" },
-  sm: { zap: "w-4   h-4",   text: "text-base  font-bold tracking-[-0.02em]", gap: "gap-2" },
-  md: { zap: "w-5   h-5",   text: "text-xl    font-bold tracking-[-0.02em]", gap: "gap-2" },
-  lg: { zap: "w-6   h-6",   text: "text-3xl   font-bold tracking-[-0.03em]", gap: "gap-2.5" },
+  xs:  { zap: "w-3.5 h-3.5", text: "text-sm   font-bold tracking-[-0.02em]", gap: "gap-1.5" },
+  sm:  { zap: "w-4   h-4",   text: "text-base  font-bold tracking-[-0.02em]", gap: "gap-2" },
+  nav: { zap: "w-5   h-5",   text: "text-lg    font-bold tracking-[-0.02em]", gap: "gap-2" },
+  md:  { zap: "w-5   h-5",   text: "text-xl    font-bold tracking-[-0.02em]", gap: "gap-2" },
+  lg:  { zap: "w-6   h-6",   text: "text-3xl   font-bold tracking-[-0.03em]", gap: "gap-2.5" },
 };
 
 export default function Logo({ size = "md" }: { size?: Size }) {

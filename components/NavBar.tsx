@@ -41,36 +41,35 @@ export function NavBar() {
 
   return (
     <nav
-      className="fixed top-0 left-0 right-0 z-30 h-14 flex items-center bg-[#0a0e1a] border-b"
-      style={{ borderBottomColor: "rgba(26, 158, 110, 0.45)" }}
+      className="fixed top-0 left-0 right-0 z-30 h-16 flex items-center bg-[#0a0e1a] border-b border-white/5"
     >
       <div className="w-full px-4 flex items-center justify-between">
         <Link href="/" className="flex items-center">
-          <Logo size="sm" />
+          <Logo size="nav" />
         </Link>
 
         {/* Right side */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-5">
           {loading ? (
             /* Skeleton — resolves once auth state is known. With server-side
                initialSession this should never show on a hard refresh. */
             <div className="flex items-center gap-2" aria-hidden>
-              <div className="w-20 h-6 bg-navy-800 rounded-lg animate-pulse" />
-              <div className="w-24 h-6 bg-navy-800 rounded-lg animate-pulse" />
-              <div className="w-7 h-7 bg-navy-800 rounded-full animate-pulse" />
+              <div className="w-20 h-6 bg-white/5 rounded-lg animate-pulse" />
+              <div className="w-24 h-6 bg-white/5 rounded-lg animate-pulse" />
+              <div className="w-8 h-8 bg-white/5 rounded-full animate-pulse" />
             </div>
           ) : user ? (
             <>
-              <div className="flex items-center gap-6">
+              <div className="flex items-center gap-8">
                 <Link
                   href="/leagues"
-                  className="text-sm font-medium text-white hover:text-slate-400 transition-colors"
+                  className="text-sm font-medium text-slate-200 hover:text-white transition-colors"
                 >
                   My Leagues
                 </Link>
                 <Link
                   href="/create"
-                  className="text-sm font-medium text-white hover:text-slate-400 transition-colors"
+                  className="border border-emerald-500/40 text-emerald-400 hover:border-emerald-500/70 hover:text-emerald-300 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
                 >
                   Create Surge
                 </Link>
@@ -80,7 +79,7 @@ export function NavBar() {
               <div ref={menuRef} className="relative">
                 <button
                   onClick={() => setMenuOpen((v) => !v)}
-                  className="w-7 h-7 rounded-full bg-navy-700 border border-navy-600 flex items-center justify-center hover:border-navy-500 transition-colors"
+                  className="w-8 h-8 rounded-full bg-white/8 border border-white/15 flex items-center justify-center hover:border-white/20 transition-colors"
                   aria-label="Account menu"
                 >
                   <span className="text-[11px] font-semibold text-slate-300 leading-none">
@@ -89,14 +88,14 @@ export function NavBar() {
                 </button>
 
                 {menuOpen && (
-                  <div className="absolute right-0 top-full mt-1.5 min-w-[180px] bg-navy-800 border border-navy-700 rounded-xl shadow-xl overflow-hidden">
-                    <div className="px-4 py-3 border-b border-navy-700">
+                  <div className="absolute right-0 top-full mt-1.5 min-w-[180px] bg-[#0d1420] border border-white/6 rounded-2xl shadow-xl overflow-hidden">
+                    <div className="px-4 py-3 border-b border-white/6">
                       <p className="text-[11px] text-slate-500 truncate">{user.email}</p>
                       <p className="text-xs font-medium text-slate-300 mt-0.5 truncate">{displayName}</p>
                     </div>
                     <button
                       onClick={handleSignOut}
-                      className="w-full flex items-center gap-2.5 px-4 py-3 text-sm text-slate-400 hover:text-slate-200 hover:bg-navy-750 transition-colors text-left"
+                      className="w-full flex items-center gap-2.5 px-4 py-3 text-sm text-slate-400 hover:text-slate-200 hover:bg-white/5 transition-colors text-left"
                     >
                       <LogOut className="w-3.5 h-3.5 flex-shrink-0" strokeWidth={1.5} />
                       Sign out
@@ -106,17 +105,17 @@ export function NavBar() {
               </div>
             </>
           ) : (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
               <Link
                 href="/auth/login"
-                className="text-xs font-medium text-slate-400 hover:text-slate-200 transition-colors px-2 py-1.5"
+                className="text-sm font-medium text-slate-300 hover:text-white transition-colors px-2 py-1.5"
               >
                 Log in
               </Link>
               {/* "Create Surge" doubles as the sign-up CTA for logged-out users */}
               <Link
                 href="/auth/signup?next=/create"
-                className="text-xs font-medium px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white transition-colors"
+                className="border border-emerald-500/40 text-emerald-400 hover:border-emerald-500/70 hover:text-emerald-300 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
               >
                 Create Surge
               </Link>

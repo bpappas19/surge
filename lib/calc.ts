@@ -10,11 +10,8 @@ import type { ManualLeague, WeekEntry, Team, TeamWeekCharge } from "./types";
 /**
  * Calculates what each team owes for one week.
  *
- * Milestone rules:
- *   0 qualifiers  → no tax collected for this milestone
- *   1 qualifier   → every team EXCEPT the qualifier pays taxPerNonQualifier
- *   2+ qualifiers, exemptIfMultipleQualify = true  → qualifiers exempt, others pay
- *   2+ qualifiers, exemptIfMultipleQualify = false → ALL teams pay (no exemption)
+ * Teams are sorted by score ascending; the bottom `config.bottomScorersCount`
+ * teams each owe `config.basePenalty`. All other teams owe nothing.
  */
 export function calculateWeekTaxes(
   entry: WeekEntry,
@@ -30,54 +27,23 @@ export function calculateWeekTaxes(
     ])
   );
 
-  const add = (teamId: string, amount: number, reason: string) => {
+  const sorted = [...entry.scores].sort((a, b) => a.points - b.points);
+  const bottomCount = Math.max(
+    1,
+    Math.min(config.bottomScorersCount, sorted.length)
+  );
+  const bottomIds = sorted.slice(0, bottomCount).map((s) => s.teamId);
+  const reason = bottomCount > 1 ? "Bottom scorer" : "Lowest scorer";
+
+  bottomIds.forEach((teamId) => {
     const c = chargeMap.get(teamId);
     if (c) {
-      c.amount += amount;
+      c.amount += config.basePenalty;
       c.reasons.push(reason);
     }
-  };
-
-  // 1. Base penalty — lowest scorer
-  if (entry.lowestScorerTeamId) {
-    add(entry.lowestScorerTeamId, config.basePenalty, "Lowest scorer");
-  }
-
-  // 2. Each milestone rule
-  config.milestones.forEach((rule, i) => {
-    const qualifiers =
-      entry.milestoneResults[i]?.qualifyingTeamIds ?? [];
-    const payers = getMilestonePayers(teams, qualifiers, rule.exemptIfMultipleQualify);
-    const label =
-      rule.type === "points"
-        ? `Below ${rule.threshold} pt threshold`
-        : `Below ${rule.threshold} TD threshold`;
-    payers.forEach((id) => add(id, rule.taxPerNonQualifier, label));
   });
 
   return Array.from(chargeMap.values());
-}
-
-function getMilestonePayers(
-  teams: Team[],
-  qualifierIds: string[],
-  exemptIfMultiple: boolean
-): string[] {
-  if (qualifierIds.length === 0) return [];
-
-  if (qualifierIds.length === 1) {
-    // Single qualifier is exempt, everyone else pays
-    return teams.filter((t) => t.id !== qualifierIds[0]).map((t) => t.id);
-  }
-
-  // 2+ qualifiers
-  if (exemptIfMultiple) {
-    const exempt = new Set(qualifierIds);
-    return teams.filter((t) => !exempt.has(t.id)).map((t) => t.id);
-  } else {
-    // Toggle off → no exemption, all teams pay
-    return teams.map((t) => t.id);
-  }
 }
 
 // ─── Season aggregation ──────────────────────────────────────────────────────

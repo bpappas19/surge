@@ -46,7 +46,7 @@ export function PaymentMethodScaffold({ leagueId, onComplete, onSkip }: Props) {
 
   if (saved) {
     return (
-      <div className="bg-navy-800 border border-emerald-500/20 rounded-xl px-5 py-5 flex items-center gap-3">
+      <div className="bg-[#0d1420] border border-emerald-500/20 rounded-2xl p-5 sm:p-6 flex items-center gap-3">
         <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0" strokeWidth={1.5} />
         <p className="text-sm text-slate-300">Payment method saved!</p>
       </div>
@@ -54,30 +54,30 @@ export function PaymentMethodScaffold({ leagueId, onComplete, onSkip }: Props) {
   }
 
   return (
-    <div className="bg-navy-800 border border-navy-700 rounded-xl px-5 py-5 space-y-4">
+    <div className="bg-[#0d1420] border border-white/6 rounded-2xl p-5 sm:p-6 space-y-4">
       {/* Header */}
       <div className="flex items-center gap-3">
         <div className="w-9 h-9 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center flex-shrink-0">
           <CreditCard className="w-4 h-4 text-emerald-400" strokeWidth={1.5} />
         </div>
         <div>
-          <p className="text-sm font-medium text-slate-200">Add payment method</p>
+          <p className="text-sm font-semibold text-white">Add payment method</p>
           <p className="text-xs text-slate-600">You&apos;ll be billed when surge taxes are due</p>
         </div>
       </div>
 
       {/* Placeholder card inputs (Stripe Elements will replace these) */}
       <div className="space-y-2.5">
-        <div className="bg-navy-900 border border-navy-700 rounded-lg px-3.5 py-2.5 flex items-center gap-2">
+        <div className="bg-white/5 border border-white/8 rounded-xl px-3.5 py-2.5 flex items-center gap-2">
           <CreditCard className="w-3.5 h-3.5 text-slate-700 flex-shrink-0" strokeWidth={1.5} />
           <span className="text-sm text-slate-700">Card number</span>
           <span className="ml-auto text-xs text-slate-700">•••• •••• •••• 4242</span>
         </div>
         <div className="grid grid-cols-2 gap-2.5">
-          <div className="bg-navy-900 border border-navy-700 rounded-lg px-3.5 py-2.5">
+          <div className="bg-white/5 border border-white/8 rounded-xl px-3.5 py-2.5">
             <span className="text-sm text-slate-700">MM / YY</span>
           </div>
-          <div className="bg-navy-900 border border-navy-700 rounded-lg px-3.5 py-2.5">
+          <div className="bg-white/5 border border-white/8 rounded-xl px-3.5 py-2.5">
             <span className="text-sm text-slate-700">CVC</span>
           </div>
         </div>
@@ -99,7 +99,7 @@ export function PaymentMethodScaffold({ leagueId, onComplete, onSkip }: Props) {
       <button
         onClick={handleSave}
         disabled={loading}
-        className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium rounded-lg py-2.5 text-sm transition-colors"
+        className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium rounded-xl py-2.5 text-sm transition-colors"
       >
         {loading ? (
           <>

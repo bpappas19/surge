@@ -8,14 +8,16 @@ import { useAuth } from "@/contexts/AuthContext";
 import {
   getUserLeagues,
   getMembers,
+  getManualTeams,
   getWeeklyResults,
   weeklyResultsToEntries,
   leagueRowToManualLeague,
+  manualTeamsToLeague,
 } from "@/lib/db";
-import { totalPot } from "@/lib/calc";
+import { totalPot, calculateWeekTaxes } from "@/lib/calc";
 import type { LeagueRow, MemberRow } from "@/lib/db";
-import type { MilestoneRule, WeekEntry, ManualLeague } from "@/lib/types";
-import { ChevronRight, Plus, Zap, Trophy } from "lucide-react";
+import type { WeekEntry, ManualLeague } from "@/lib/types";
+import { ChevronRight, ChevronDown, Plus, Zap, CheckCircle2 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -25,6 +27,8 @@ interface LeagueCard {
   allMembers: MemberRow[];
   entries: WeekEntry[];
   adaptedLeague: ManualLeague;
+  /** Team id to look up "my" charges in calculateWeekTaxes — manual_teams.id for manual leagues. */
+  myTeamId: string | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -47,48 +51,29 @@ function currentPot(card: LeagueCard): number {
 }
 
 function maxPotential(card: LeagueCard): number {
-  const { row, adaptedLeague, entries } = card;
-  const milestones = (row.milestones ?? []) as MilestoneRule[];
+  const { adaptedLeague, entries } = card;
   const played = weeksPlayed(entries);
   const remaining = Math.max(0, (card.row.total_weeks ?? 14) - played);
 
-  const milestoneMax = milestones.reduce(
-    (sum, m) => sum + m.taxPerNonQualifier * row.team_count,
-    0
+  const bottomCount = Math.max(
+    1,
+    Math.min(adaptedLeague.config.bottomScorersCount, adaptedLeague.teams.length)
   );
-  const maxPerWeek = adaptedLeague.config.basePenalty + milestoneMax;
+  const maxPerWeek = adaptedLeague.config.basePenalty * bottomCount;
   return currentPot(card) + remaining * maxPerWeek;
 }
 
 function myTaxDebt(card: LeagueCard): number {
-  const { myMember, adaptedLeague, entries } = card;
-  if (!myMember) return 0;
+  const { myTeamId, adaptedLeague, entries } = card;
+  if (!myTeamId) return 0;
   if (card.row.mode !== "manual") return 0;
 
   let debt = 0;
   for (const entry of entries) {
-    const config = adaptedLeague.config;
-
-    if (entry.lowestScorerTeamId === myMember.id) {
-      debt += config.basePenalty;
-    }
-
-    config.milestones.forEach((rule, i) => {
-      const qualifiers = entry.milestoneResults[i]?.qualifyingTeamIds ?? [];
-      if (qualifiers.length === 0) return;
-      const isQualifier = qualifiers.includes(myMember.id);
-      const multipleExempt =
-        qualifiers.length > 1 && rule.exemptIfMultipleQualify;
-
-      if (rule.exemptIfMultipleQualify && isQualifier) return;
-      if (!rule.exemptIfMultipleQualify && !multipleExempt) {
-        debt += rule.taxPerNonQualifier;
-        return;
-      }
-      if (!isQualifier) {
-        debt += rule.taxPerNonQualifier;
-      }
-    });
+    const charge = calculateWeekTaxes(entry, adaptedLeague).find(
+      (c) => c.teamId === myTeamId
+    );
+    debt += charge?.amount ?? 0;
   }
   return debt;
 }
@@ -118,134 +103,106 @@ function LeagueCardView({ card }: { card: LeagueCard }) {
     remaining === 0 ||
     Number(row.season) < currentYear;
 
-  const startingPot = row.buy_in * row.team_count;
-  const progress =
-    maxPot > startingPot
-      ? Math.min(100, ((pot - startingPot) / (maxPot - startingPot)) * 100)
-      : 0;
 
   const dashboardHref =
     row.mode === "sleeper"
       ? `/league/${row.sleeper_league_id}`
       : `/m/${row.id}`;
 
+  const totalWeeks = row.total_weeks ?? 14;
+
   return (
-    <div
-      className={`bg-navy-800 border rounded-2xl overflow-hidden transition-colors group ${
-        isCommissioner
-          ? "border-navy-700 border-l-2 border-l-emerald-500/40 hover:border-l-emerald-500/60"
-          : "border-navy-700 hover:border-navy-600"
-      }`}
-    >
+    <div className="bg-[#0d1420] border border-white/6 rounded-2xl overflow-hidden transition-all duration-200 hover:border-white/12 hover:bg-white/3">
 
       {/* Pot area */}
-      <div
-        className="px-5 pt-5 pb-4"
-        style={{ background: "linear-gradient(160deg, rgba(9,13,24,0.55) 0%, rgba(17,30,50,0) 100%)" }}
-      >
+      <div className="p-5 pb-3">
         {/* Name + badges row */}
         <div className="flex items-start justify-between gap-3 mb-4">
-          <div className="flex items-center gap-2.5 flex-wrap min-w-0">
-            <h2 className="text-base font-bold text-slate-100 leading-tight truncate">
+          <div className="flex items-center gap-2 flex-wrap min-w-0">
+            <h2 className="text-base font-semibold text-white leading-tight truncate">
               {row.name}
             </h2>
             {isCommissioner && (
-              <span className="flex-shrink-0 text-[10px] font-semibold uppercase tracking-wide bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 rounded px-1.5 py-0.5">
+              <span className="flex-shrink-0 text-[10px] font-bold tracking-wide px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-400 border border-emerald-500/20">
                 Commissioner
               </span>
             )}
           </div>
-          <span className="flex-shrink-0 text-[10px] font-semibold uppercase tracking-wide bg-navy-700 text-slate-400 border border-navy-600 rounded px-1.5 py-0.5">
+          <span className="flex-shrink-0 text-[10px] text-slate-500 border border-white/8 rounded-md px-2 py-0.5">
             {row.mode === "sleeper" ? "Sleeper" : "Manual"}
           </span>
         </div>
 
         {/* Giant pot number */}
-        <p className="text-[11px] font-medium text-slate-500 mb-0.5">
+        <p className="text-xs text-slate-500 mb-1.5">
           {isComplete ? "Final pot" : "Current pot"}
         </p>
-        <p className="text-4xl font-bold text-emerald-400 tabular-nums leading-none">
+        <p className="text-4xl font-bold text-white tabular-nums leading-none">
           ${pot.toLocaleString()}
         </p>
 
-        {/* Season complete badge — replaces the "Could Nx" growth indicator */}
+        {/* Season complete badge — replaces the "Could reach" growth indicator */}
         {isComplete ? (
-          <div className="flex items-center gap-1.5 mt-2">
-            <Trophy className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" strokeWidth={1.5} />
-            <p className="text-sm font-semibold text-amber-400">Season complete</p>
+          <div className="flex items-center gap-1.5 mt-3">
+            <CheckCircle2 className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" strokeWidth={1.5} />
+            <p className="text-sm text-slate-300">Season complete</p>
           </div>
         ) : (
           remaining > 0 && maxPot > pot && pot > 0 && (
-            <p className="text-lg font-semibold text-amber-400/75 mt-2 leading-snug">
-              Could {Math.round(maxPot / pot)}x
+            <p className="text-emerald-400 text-sm mt-1.5">
+              Could reach ${maxPot.toLocaleString()}
             </p>
           )
         )}
       </div>
 
-      {/* Progress bar — only for active seasons where the pot can still grow */}
-      {!isComplete && maxPot > startingPot && (
-        <div className="px-5 pb-4">
-          <div className="h-[6px] bg-navy-700 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-emerald-500/70 rounded-full transition-all duration-500"
-              style={{
-                width: `${progress}%`,
-                boxShadow: progress > 0 ? "0 0 8px rgba(16, 185, 129, 0.45)" : undefined,
-              }}
-            />
-          </div>
-          <div className="flex justify-between mt-1.5">
-            <span className="text-[10px] text-slate-700 tabular-nums">
-              ${startingPot.toLocaleString()} start
-            </span>
-            <span className="text-[10px] text-slate-700 tabular-nums">
-              ${maxPot.toLocaleString()} max
-            </span>
-          </div>
-        </div>
-      )}
-
       {/* Divider */}
-      <div className="border-t border-navy-700 mx-5" />
+      <div className="border-t border-white/5 mx-5" />
 
       {/* Position / week progress */}
-      <div className="px-5 py-3.5 flex items-center justify-between gap-4">
+      <div className="px-5 py-3 flex items-center justify-between gap-4">
         <div>
-          <p className="text-[10px] text-slate-600 mb-0.5">Your position</p>
-          <p className="text-xs font-medium text-slate-400">
+          <p className="text-xs text-slate-600 mb-1">Your position</p>
+          <p className="text-sm font-medium text-slate-400">
             {isCommissioner ? "Commissioner" : "Member"}
             {!isCommissioner && debt > 0 && (
               <span className="ml-2 text-red-400 tabular-nums font-bold">
-                −${debt} owed
+                −${debt.toLocaleString()} owed
               </span>
             )}
             {!isCommissioner && debt === 0 && played > 0 && (
-              <span className="ml-2 text-emerald-400 text-[11px]">No debt</span>
+              <span className="ml-2 text-emerald-400 text-xs">No debt</span>
             )}
           </p>
         </div>
         <div className="text-right">
-          <p className="text-[10px] text-slate-600 mb-0.5">Season</p>
-          <p className="text-xs text-slate-500 tabular-nums">
-            {isComplete ? "Complete" : `Wk ${played}/${row.total_weeks ?? 14}`}
-          </p>
+          <p className="text-xs text-slate-600 mb-1">Season</p>
+          {isComplete ? (
+            <p className="text-sm text-slate-500">Complete</p>
+          ) : (
+            <div className="flex items-center gap-1.5 justify-end">
+              <span className="text-xs text-slate-500 tabular-nums">
+                Wk {played}/{totalWeeks}
+              </span>
+              <div className="w-10 h-1 bg-white/6 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-emerald-500/70 rounded-full"
+                  style={{ width: `${Math.min(100, (played / totalWeeks) * 100)}%` }}
+                />
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
       {/* CTA */}
-      <div className="px-5 pb-5">
+      <div className="px-5 pb-4 flex justify-end">
         <Link
           href={dashboardHref}
-          className="w-full flex items-center justify-between bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 rounded-xl px-4 py-3 transition-colors group/btn"
+          className="text-emerald-400 hover:text-emerald-300 text-sm font-medium flex items-center gap-1 transition-colors"
         >
-          <span className="text-sm font-semibold text-white">
-            View league
-          </span>
-          <ChevronRight
-            className="w-4 h-4 text-white/70 group-hover/btn:text-white transition-colors"
-            strokeWidth={1.75}
-          />
+          View league
+          <ChevronRight className="w-4 h-4" strokeWidth={1.75} />
         </Link>
       </div>
     </div>
@@ -256,12 +213,12 @@ function LeagueCardView({ card }: { card: LeagueCard }) {
 
 function EmptyState() {
   return (
-    <div className="bg-navy-800 border border-navy-700 rounded-2xl px-6 py-10 text-center">
-      <div className="w-12 h-12 rounded-full bg-navy-700 flex items-center justify-center mx-auto mb-4">
+    <div className="bg-[#0d1420] border border-white/6 rounded-2xl p-6 sm:p-8 text-center">
+      <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center mx-auto mb-4">
         <Zap className="w-5 h-5 text-slate-600" strokeWidth={1.5} />
       </div>
-      <p className="text-slate-300 font-semibold mb-1">No leagues yet</p>
-      <p className="text-sm text-slate-600 mb-6">
+      <p className="text-white font-semibold mb-1">No leagues yet</p>
+      <p className="text-sm text-slate-400 mb-6">
         Set up your league to start tracking the pot.
       </p>
       <CTAButtons />
@@ -271,12 +228,12 @@ function EmptyState() {
 
 function EmptyYearState({ year }: { year: string }) {
   return (
-    <div className="bg-navy-800 border border-navy-700 rounded-2xl px-6 py-10 text-center">
-      <div className="w-12 h-12 rounded-full bg-navy-700 flex items-center justify-center mx-auto mb-4">
+    <div className="bg-[#0d1420] border border-white/6 rounded-2xl p-6 sm:p-8 text-center">
+      <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center mx-auto mb-4">
         <Zap className="w-5 h-5 text-slate-600" strokeWidth={1.5} />
       </div>
-      <p className="text-slate-300 font-semibold mb-1">No leagues for {year}</p>
-      <p className="text-sm text-slate-600 mb-6">
+      <p className="text-white font-semibold mb-1">No leagues for {year}</p>
+      <p className="text-sm text-slate-400 mb-6">
         You don&apos;t have any Surge leagues set up for the {year} season.
       </p>
       <CTAButtons />
@@ -289,49 +246,18 @@ function CTAButtons() {
     <div className="flex flex-col sm:flex-row gap-3 justify-center">
       <Link
         href="/sleeper"
-        className="flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-sm px-4 py-2.5 rounded-lg transition-colors"
+        className="flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-sm px-4 py-2.5 rounded-xl transition-colors"
       >
         <Plus className="w-3.5 h-3.5" strokeWidth={2} />
         Connect Sleeper
       </Link>
       <Link
         href="/setup"
-        className="flex items-center justify-center gap-2 bg-navy-700 hover:bg-navy-600 border border-navy-600 hover:border-navy-500 text-slate-200 font-medium text-sm px-4 py-2.5 rounded-lg transition-colors"
+        className="flex items-center justify-center gap-2 bg-white/5 hover:bg-white/8 border border-white/10 hover:border-white/20 text-slate-200 font-medium text-sm px-4 py-2.5 rounded-xl transition-colors"
       >
         <Plus className="w-3.5 h-3.5" strokeWidth={2} />
         Manual setup
       </Link>
-    </div>
-  );
-}
-
-// ─── Year pill selector ───────────────────────────────────────────────────────
-
-function YearPills({
-  years,
-  selected,
-  onChange,
-}: {
-  years: string[];
-  selected: string;
-  onChange: (y: string) => void;
-}) {
-  if (years.length <= 1) return null; // only show if there's something to filter
-  return (
-    <div className="flex items-center gap-2 overflow-x-auto pb-0.5 -mx-1 px-1">
-      {years.map((year) => (
-        <button
-          key={year}
-          onClick={() => onChange(year)}
-          className={`flex-shrink-0 px-4 py-1.5 rounded-full text-sm font-semibold transition-all border ${
-            selected === year
-              ? "bg-navy-700 border-emerald-500/60 text-white shadow-[0_0_10px_rgba(16,185,129,0.15)]"
-              : "bg-navy-800 border-navy-600 text-slate-400 hover:text-slate-200 hover:border-navy-500"
-          }`}
-        >
-          {year}
-        </button>
-      ))}
     </div>
   );
 }
@@ -346,6 +272,7 @@ export default function LeaguesPage() {
   const [cards,        setCards]        = useState<LeagueCard[]>([]);
   const [loading,      setLoading]      = useState(true);
   const [selectedYear, setSelectedYear] = useState("");
+  const [showPastSeasons, setShowPastSeasons] = useState(false);
 
   const loadLeagues = useCallback(async () => {
     if (!user) return;
@@ -362,10 +289,18 @@ export default function LeaguesPage() {
           getMembers(supabase, row.id),
           getWeeklyResults(supabase, row.id),
         ]);
-        const myMember     = members.find((m) => m.user_id === user.id) ?? null;
-        const entries      = weeklyResultsToEntries(weekRows, row.id);
+        const myMember = members.find((m) => m.user_id === user.id) ?? null;
+        const entries   = weeklyResultsToEntries(weekRows, row.id);
+
+        if (row.mode === "manual") {
+          const teams        = await getManualTeams(supabase, row.id);
+          const adaptedLeague = manualTeamsToLeague(row, teams);
+          const myTeam        = teams.find((t) => t.claimed_by_user_id === user.id);
+          return { row, myMember, allMembers: members, entries, adaptedLeague, myTeamId: myTeam?.id ?? null };
+        }
+
         const adaptedLeague = leagueRowToManualLeague(row, members);
-        return { row, myMember, allMembers: members, entries, adaptedLeague };
+        return { row, myMember, allMembers: members, entries, adaptedLeague, myTeamId: myMember?.id ?? null };
       })
     );
 
@@ -409,7 +344,7 @@ export default function LeaguesPage() {
   if (authLoading || loading) {
     return (
       <div className="min-h-screen bg-navy-950 flex items-center justify-center">
-        <div className="w-6 h-6 border-2 border-navy-700 border-t-emerald-500 rounded-full animate-spin" />
+        <div className="w-6 h-6 border-2 border-white/10 border-t-emerald-500 rounded-full animate-spin" />
       </div>
     );
   }
@@ -421,24 +356,15 @@ export default function LeaguesPage() {
   return (
     <main className="min-h-screen bg-navy-950 pb-16">
       <div className="w-full max-w-2xl mx-auto px-4 pt-5 pb-3">
-        <h1 className="text-2xl font-bold text-slate-100 tracking-tight">
+        <h1 className="text-2xl font-bold text-white tracking-tight">
           Your leagues
         </h1>
-        <p className="text-sm text-slate-600 mt-1">
+        <p className="text-sm text-slate-400 mt-1">
           Season ends. Winner takes all.
         </p>
       </div>
 
       <div className="w-full max-w-2xl mx-auto px-4 space-y-4">
-        {/* Year pill selector — only visible when leagues span multiple seasons */}
-        {years.length > 1 && (
-          <YearPills
-            years={years}
-            selected={selectedYear}
-            onChange={setSelectedYear}
-          />
-        )}
-
         {/* League cards or empty state */}
         {cards.length === 0 ? (
           <EmptyState />
@@ -448,6 +374,36 @@ export default function LeaguesPage() {
           filteredCards.map((card) => (
             <LeagueCardView key={card.row.id} card={card} />
           ))
+        )}
+
+        {/* Past seasons toggle — only visible when leagues span multiple seasons */}
+        {cards.length > 0 && years.length > 1 && (
+          <div className="px-1">
+            <button
+              type="button"
+              onClick={() => setShowPastSeasons((v) => !v)}
+              className="text-xs text-slate-600 hover:text-slate-400 transition-colors"
+            >
+              View past seasons
+            </button>
+            {showPastSeasons && (
+              <div className="relative inline-block mt-2 ml-2">
+                <select
+                  value={selectedYear}
+                  onChange={(e) => setSelectedYear(e.target.value)}
+                  className="appearance-none cursor-pointer bg-[#0d1420] border border-white/6 focus:border-emerald-500/40 rounded-lg pl-3.5 pr-9 py-1.5 text-sm text-slate-300 outline-none transition-colors"
+                >
+                  {years.map((year) => (
+                    <option key={year} value={year}>{year}</option>
+                  ))}
+                </select>
+                <ChevronDown
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-600 pointer-events-none"
+                  strokeWidth={1.5}
+                />
+              </div>
+            )}
+          </div>
         )}
       </div>
     </main>

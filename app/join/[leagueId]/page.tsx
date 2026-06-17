@@ -19,26 +19,26 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Zap, AlertCircle, CheckCircle2 } from "lucide-react";
 import { createClient } from "@/lib/supabase-browser";
-import { getLeagueById, getMember, addMember } from "@/lib/db";
+import { getLeagueById, getMember, addMember, getManualTeams, claimManualTeam } from "@/lib/db";
 import { useAuth } from "@/contexts/AuthContext";
 import { PaymentMethodScaffold } from "@/components/PaymentMethodScaffold";
-import type { LeagueRow, MemberRow } from "@/lib/db";
-import type { MilestoneRule } from "@/lib/types";
+import { ClaimTeamList } from "@/components/ClaimTeamList";
+import type { LeagueRow, MemberRow, ManualTeamRow } from "@/lib/db";
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
 const inputCls =
   "w-full bg-white/5 border border-white/10 focus:border-emerald-500/40 " +
-  "rounded-lg px-3.5 py-3 text-sm text-slate-100 placeholder:text-slate-500 " +
+  "rounded-xl px-3.5 py-3 text-sm text-slate-100 placeholder:text-slate-500 " +
   "outline-none transition-colors";
 
 const primaryBtnCls =
   "w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 " +
   "active:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed " +
-  "text-white font-semibold rounded-xl py-3.5 text-sm transition-colors " +
+  "text-white font-semibold rounded-xl py-3 text-base transition-colors " +
   "shadow-lg shadow-emerald-950/50";
 
-type PageState = "loading" | "not-found" | "needs-auth" | "join-form" | "stripe-step" | "done";
+type PageState = "loading" | "not-found" | "needs-auth" | "join-form" | "claim-team" | "stripe-step" | "done";
 type AuthTab   = "signin" | "signup";
 
 // ─── Pot calculators ──────────────────────────────────────────────────────────
@@ -51,13 +51,8 @@ function computeCurrentPot(row: LeagueRow): number {
 }
 
 function computeMaxPotential(row: LeagueRow): number {
-  const current   = computeCurrentPot(row);
-  const milestones = (row.milestones ?? []) as MilestoneRule[];
-  const milestoneMax = milestones.reduce(
-    (sum, m) => sum + m.taxPerNonQualifier * row.team_count,
-    0
-  );
-  const maxPerWeek = row.base_penalty + milestoneMax;
+  const current = computeCurrentPot(row);
+  const maxPerWeek = row.base_penalty * (row.bottom_scorers_count ?? 1);
   return current + TOTAL_WEEKS * maxPerWeek;
 }
 
@@ -112,6 +107,9 @@ export default function JoinPage() {
   const [joining,   setJoining]   = useState(false);
   const [joinError, setJoinError] = useState("");
 
+  // Manual league team-claim state
+  const [manualTeams, setManualTeams] = useState<ManualTeamRow[]>([]);
+
   const dashboardHref = league
     ? league.mode === "sleeper" && league.sleeper_league_id
       ? `/league/${league.sleeper_league_id}`
@@ -131,6 +129,28 @@ export default function JoinPage() {
 
   const checkMembership = useCallback(async () => {
     if (!league || !user) return;
+
+    if (league.mode === "manual") {
+      // Ensure the user has a league_members row (for role/payment tracking),
+      // then check whether they've claimed one of the commissioner's teams yet.
+      let existing = await getMember(supabase, league.id, user.id);
+      if (!existing) {
+        const name = (user.user_metadata?.display_name as string | undefined) ?? "Member";
+        existing = await addMember(supabase, league.id, user.id, "member", name);
+      }
+      setMembership(existing);
+
+      const teams = await getManualTeams(supabase, league.id);
+      const alreadyClaimed = teams.some((t) => t.claimed_by_user_id === user.id);
+      if (alreadyClaimed) {
+        router.replace(dashboardHref);
+      } else {
+        setManualTeams(teams);
+        setPageState("claim-team");
+      }
+      return;
+    }
+
     const existing = await getMember(supabase, league.id, user.id);
     if (existing) {
       setMembership(existing);
@@ -178,6 +198,19 @@ export default function JoinPage() {
     // Auth state change re-triggers the useEffect above to check membership
   }
 
+  // ── Claim team handler (manual leagues) ───────────────────────────────────
+
+  async function handleClaimTeam(teamId: string) {
+    if (!user) return;
+    const claimed = await claimManualTeam(supabase, teamId, user.id);
+    if (!claimed) {
+      // Someone else claimed it first — refresh the list so it shows as taken.
+      if (league) setManualTeams(await getManualTeams(supabase, league.id));
+      throw new Error("That team was just claimed by someone else — pick another.");
+    }
+    setPageState("stripe-step");
+  }
+
   // ── Join handler ───────────────────────────────────────────────────────────
 
   async function handleJoin() {
@@ -213,7 +246,7 @@ export default function JoinPage() {
       <main
         className="relative flex flex-col items-center px-5 pb-16 pt-[10vh]"
         style={{
-          minHeight: "calc(100vh - 56px)",
+          minHeight: "calc(100vh - 64px)",
           backgroundImage: STADIUM_BG,
           backgroundSize: "cover",
           backgroundPosition: "center",
@@ -267,8 +300,8 @@ export default function JoinPage() {
             </div>
           )}
 
-          {/* ── Hero league info — shown for needs-auth and join-form ── */}
-          {league && (pageState === "needs-auth" || pageState === "join-form") && (
+          {/* ── Hero league info — shown for needs-auth, join-form, and claim-team ── */}
+          {league && (pageState === "needs-auth" || pageState === "join-form" || pageState === "claim-team") && (
             <div className="flex flex-col items-center text-center w-full mb-8">
               {/* Invite label */}
               <p className="text-sm text-slate-400 mb-2">You&apos;ve been invited to join</p>
@@ -279,17 +312,17 @@ export default function JoinPage() {
               </h1>
 
               {/* Pot display */}
-              <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-[0.18em] mb-1.5">
+              <p className="text-[11px] text-slate-500 uppercase tracking-widest font-medium mb-1.5">
                 Current pot
               </p>
-              <p className="text-[56px] font-bold text-emerald-400 tabular-nums leading-none pot-glow">
+              <p className="text-6xl sm:text-7xl font-bold text-emerald-400 tabular-nums leading-none pot-glow">
                 ${currentPot.toLocaleString()}
               </p>
 
               {/* Max potential */}
               {maxPot > currentPot && (
-                <p className="text-lg font-semibold text-amber-400 mt-3">
-                  Could grow to ${maxPot.toLocaleString()}
+                <p className="text-emerald-400 text-xl font-semibold mt-3">
+                  Could reach ${maxPot.toLocaleString()}
                 </p>
               )}
             </div>
@@ -298,7 +331,7 @@ export default function JoinPage() {
           {/* ── Pitch line — needs-auth only ── */}
           {pageState === "needs-auth" && league && (
             <p className="text-[15px] leading-relaxed text-slate-400 text-center mb-9 px-2">
-              Every week, league milestones tax your opponents and grow this pot.
+              Every week, the lowest scorers pay into this pot.
               The season winner takes everything.
             </p>
           )}
@@ -314,7 +347,7 @@ export default function JoinPage() {
                     onClick={() => { setAuthTab(tab); setAuthError(""); }}
                     className={`flex-1 pb-3 text-sm font-medium transition-colors ${
                       authTab === tab
-                        ? "text-slate-100 border-b-2 border-emerald-500"
+                        ? "text-white border-b-2 border-emerald-500"
                         : "text-slate-500 hover:text-slate-300"
                     }`}
                   >
@@ -430,6 +463,11 @@ export default function JoinPage() {
             </div>
           )}
 
+          {/* ── Claim team — manual leagues ── */}
+          {pageState === "claim-team" && league && (
+            <ClaimTeamList teams={manualTeams} onClaim={handleClaimTeam} />
+          )}
+
           {/* ── Stripe step ── */}
           {pageState === "stripe-step" && league && (
             <div className="w-full space-y-5">
@@ -439,7 +477,7 @@ export default function JoinPage() {
                     className="w-5 h-5 text-emerald-400"
                     strokeWidth={1.5}
                   />
-                  <p className="text-lg font-semibold text-slate-100">
+                  <p className="text-lg font-semibold text-white">
                     You&apos;re in!
                   </p>
                 </div>
