@@ -192,7 +192,7 @@ export default function ManualDashboard() {
   return (
     <main className="min-h-screen bg-navy-950 pb-12">
       {/* Inline page header */}
-      <div className="w-full max-w-2xl mx-auto px-4 pt-5 pb-4 flex items-center gap-3 border-b border-white/6">
+      <div className="w-full max-w-2xl mx-auto px-4 pt-5 pb-4 flex items-center gap-3">
         <button
           onClick={() => router.push("/")}
           className="text-slate-500 hover:text-slate-300 transition-colors p-1 -ml-1 flex-shrink-0"
@@ -267,26 +267,13 @@ export default function ManualDashboard() {
               </p>
             </>
           )}
-        </div>
-
-        {/* ── Pre-season rules card ── */}
-        {entries.length === 0 && (
-          <div className="bg-emerald-500/[0.04] border border-white/6 rounded-2xl p-5 space-y-3">
-            <p className="text-xs text-slate-500">How your pot grows</p>
-
-            <p className="text-sm text-emerald-400 font-medium">
-              ${weeklyAddition.toLocaleString()} added per week · ${potentialTotal.toLocaleString()} potential over {totalWeeks} weeks
-            </p>
-
-            <div className="py-2">
-              <p className="text-sm text-slate-300">
-                Bottom {bottomCount} scorer{bottomCount > 1 ? "s" : ""} each week owe ${league.config.basePenalty.toLocaleString()} — ${weeklyAddition.toLocaleString()} added to the pot
-              </p>
+          {entries.length === 0 && (
+            <div className="mt-3">
+              <p className="text-sm text-slate-400">${weeklyAddition.toLocaleString()} added per week · ${potentialTotal.toLocaleString()} potential this season</p>
+              <p className="text-xs text-slate-600 mt-1">Bottom {bottomCount} scorer{bottomCount > 1 ? "s" : ""} pays each week</p>
             </div>
-
-            <p className="text-xs text-slate-600 pt-2 border-t border-white/6">Taxes accumulate all season. Winner collects everything.</p>
-          </div>
-        )}
+          )}
+        </div>
 
         {/* ── Champion section ── */}
         <div className="bg-[#0d1420] border border-white/6 rounded-2xl overflow-hidden">

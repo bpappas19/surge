@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState, useMemo } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase-browser";
@@ -15,16 +15,7 @@ import {
 } from "@/lib/db";
 import { calculateWeekTaxes } from "@/lib/calc";
 import type { ManualLeague, WeekEntry } from "@/lib/types";
-import { ChevronLeft, AlertCircle, ChevronDown, ChevronUp } from "lucide-react";
-
-// ─── Shared styles ────────────────────────────────────────────────────────────
-
-const inputCls =
-  "w-full bg-white/5 border border-white/8 focus:border-emerald-500/40 " +
-  "rounded-xl px-3.5 py-2.5 text-sm " +
-  "text-white placeholder:text-slate-600 outline-none transition-colors tabular-nums";
-
-const labelCls = "block text-xs text-slate-500 mb-2";
+import { ChevronLeft, ChevronDown, ChevronUp, CheckCircle2 } from "lucide-react";
 
 // ─── Inner form (uses useSearchParams — must be inside <Suspense>) ────────────
 
@@ -35,15 +26,32 @@ function WeekFormInner() {
   const { user }     = useAuth();
   const editWeek     = searchParams.get("week") ? Number(searchParams.get("week")) : null;
 
-  const [supabase] = useState(() => createClient());
-  const [league,   setLeague]  = useState<ManualLeague | null>(null);
-  const [loading,  setLoading] = useState(true);
-  const [saving,   setSaving]  = useState(false);
-  const [saveError, setSaveError] = useState("");
+  const [supabase]    = useState(() => createClient());
+  const [league,      setLeague]     = useState<ManualLeague | null>(null);
+  const [allEntries,  setAllEntries] = useState<WeekEntry[]>([]);
+  const [loading,     setLoading]    = useState(true);
+  const [saving,      setSaving]     = useState(false);
+  const [saved,       setSaved]      = useState(false);
+  const [saveError,   setSaveError]  = useState("");
+  const [weekNumber,  setWeekNumber] = useState(1);
+  const [selected,    setSelected]   = useState<string[]>([]); // team IDs in tap order (FIFO)
 
-  // Form state
-  const [weekNumber, setWeekNumber] = useState<number>(1);
-  const [scores,     setScores]     = useState<Record<string, string>>({});
+  // Load selection state for any given week from existing entries
+  function applyWeekSelection(week: number, lg: ManualLeague, entries: WeekEntry[]) {
+    const existing = entries.find((e) => e.week === week);
+    if (!existing) { setSelected([]); return; }
+
+    const taxes    = calculateWeekTaxes(existing, lg);
+    const taxedIds = taxes.filter((t) => t.amount > 0).map((t) => t.teamId);
+    const bc       = Math.max(1, Math.min(lg.config.bottomScorersCount, lg.teams.length));
+    const flip     = bc === lg.teams.length - 1;
+    if (flip) {
+      const winnerId = lg.teams.find((t) => !taxedIds.includes(t.id))?.id;
+      setSelected(winnerId ? [winnerId] : []);
+    } else {
+      setSelected(taxedIds);
+    }
+  }
 
   useEffect(() => {
     async function load() {
@@ -55,7 +63,6 @@ function WeekFormInner() {
         getWeeklyResults(supabase, leagueId),
       ]);
 
-      // Commissioner check — redirect members
       if (user && user.id !== row.commissioner_id) {
         router.replace(`/m/${leagueId}`);
         return;
@@ -66,68 +73,14 @@ function WeekFormInner() {
       const defaultWeek  = editWeek ?? (entries[entries.length - 1]?.week ?? 0) + 1;
 
       setLeague(manualLeague);
+      setAllEntries(entries);
       setWeekNumber(defaultWeek);
-
-      // Pre-fill when editing
-      if (editWeek) {
-        const existing = entries.find((e) => e.week === editWeek);
-        if (existing) {
-          const prefill: Record<string, string> = {};
-          existing.scores.forEach(({ teamId, points }) => {
-            prefill[teamId] = String(points);
-          });
-          setScores(prefill);
-        }
-      }
-
+      applyWeekSelection(defaultWeek, manualLeague, entries);
       setLoading(false);
     }
     load();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supabase, leagueId, editWeek, user, router]);
-
-  const allScoresEntered = useMemo(
-    () => !!league && league.teams.every((t) => scores[t.id]?.trim() !== "" && scores[t.id] !== undefined),
-    [league, scores]
-  );
-
-  const preview = useMemo(() => {
-    if (!league || !allScoresEntered) return null;
-    const entry: WeekEntry = {
-      leagueId,
-      week: weekNumber,
-      scores: league.teams.map((t) => ({ teamId: t.id, points: Number(scores[t.id]) || 0 })),
-      submittedAt: new Date().toISOString(),
-    };
-    return calculateWeekTaxes(entry, league);
-  }, [league, allScoresEntered, scores, weekNumber, leagueId]);
-
-  const previewTotal = preview?.reduce((s, c) => s + c.amount, 0) ?? 0;
-
-  async function submit() {
-    if (!league || !allScoresEntered) return;
-    setSaving(true);
-    setSaveError("");
-    try {
-      const entryScores = league.teams.map((t) => ({ teamId: t.id, points: Number(scores[t.id]) || 0 }));
-      const entry: WeekEntry = {
-        leagueId,
-        week: weekNumber,
-        scores: entryScores,
-        submittedAt: new Date().toISOString(),
-      };
-      const taxes = calculateWeekTaxes(entry, league);
-      await upsertWeeklyResult(supabase, {
-        leagueId,
-        week: weekNumber,
-        scores: entryScores,
-        taxes,
-      });
-      router.push(`/m/${leagueId}`);
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "Failed to save results.");
-      setSaving(false);
-    }
-  }
 
   // ── Loading / not found ────────────────────────────────────────────────────
 
@@ -150,14 +103,68 @@ function WeekFormInner() {
     );
   }
 
+  // ── Derived ────────────────────────────────────────────────────────────────
+
   const bottomCount = Math.max(1, Math.min(league.config.bottomScorersCount, league.teams.length));
+  const isFlipped   = bottomCount === league.teams.length - 1;
+  const target      = isFlipped ? 1 : bottomCount;
+  const isReady     = selected.length === target;
+  const isExisting  = allEntries.some((e) => e.week === weekNumber);
+
+  function stepWeek(delta: number) {
+    const next = Math.max(1, weekNumber + delta);
+    setWeekNumber(next);
+    applyWeekSelection(next, league!, allEntries);
+  }
+
+  function toggle(teamId: string) {
+    setSelected((prev) => {
+      if (prev.includes(teamId)) return prev.filter((id) => id !== teamId);
+      if (prev.length >= target) return [...prev.slice(1), teamId]; // FIFO
+      return [...prev, teamId];
+    });
+  }
+
+  async function submit() {
+    if (!league || !isReady) return;
+    setSaving(true);
+    setSaveError("");
+
+    try {
+      const loserIds = isFlipped
+        ? league.teams.filter((t) => !selected.includes(t.id)).map((t) => t.id)
+        : selected;
+
+      const scores = league.teams.map((t) => ({
+        teamId: t.id,
+        points: loserIds.includes(t.id) ? 0 : 100,
+      }));
+
+      const entry: WeekEntry = {
+        leagueId,
+        week: weekNumber,
+        scores,
+        submittedAt: new Date().toISOString(),
+      };
+      const taxes = calculateWeekTaxes(entry, league);
+
+      await upsertWeeklyResult(supabase, { leagueId, week: weekNumber, scores, taxes });
+
+      setSaved(true);
+      setTimeout(() => router.push(`/m/${leagueId}`), 1000);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Failed to save results.");
+      setSaving(false);
+    }
+  }
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
     <main className="min-h-screen bg-navy-950 pb-12">
-      {/* Inline page header */}
-      <div className="w-full max-w-md mx-auto px-4 pt-5 pb-2 flex items-center gap-3">
+
+      {/* Page header */}
+      <div className="w-full max-w-md mx-auto px-4 pt-5 pb-4 flex items-center gap-3">
         <Link
           href={`/m/${leagueId}`}
           className="text-slate-500 hover:text-slate-300 transition-colors p-1 -ml-1 flex-shrink-0"
@@ -172,127 +179,97 @@ function WeekFormInner() {
         </div>
       </div>
 
-      <div className="w-full max-w-md mx-auto px-4 pb-6 space-y-6">
+      <div className="w-full max-w-md mx-auto px-4 space-y-5">
 
-        {/* ── Week number ── */}
+        {/* Week stepper — hidden when coming from a direct edit link */}
         {!editWeek && (
-          <div>
-            <label className={labelCls}>Week number</label>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setWeekNumber((n) => Math.max(1, n - 1))}
-                className="w-9 h-9 flex items-center justify-center rounded-xl bg-[#0d1420] border border-white/6 hover:border-white/20 text-slate-400 hover:text-slate-200 transition-colors"
-              >
-                <ChevronDown className="w-4 h-4" strokeWidth={1.5} />
-              </button>
-              <p className="flex-1 text-center text-2xl font-bold text-white tabular-nums">
-                {weekNumber}
-              </p>
-              <button
-                type="button"
-                onClick={() => setWeekNumber((n) => n + 1)}
-                className="w-9 h-9 flex items-center justify-center rounded-xl bg-[#0d1420] border border-white/6 hover:border-white/20 text-slate-400 hover:text-slate-200 transition-colors"
-              >
-                <ChevronUp className="w-4 h-4" strokeWidth={1.5} />
-              </button>
-            </div>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => stepWeek(-1)}
+              className="w-8 h-8 flex items-center justify-center rounded-lg bg-white/5 border border-white/8 hover:border-white/20 text-slate-400 hover:text-slate-200 transition-colors"
+            >
+              <ChevronDown className="w-4 h-4" strokeWidth={1.5} />
+            </button>
+            <p className="text-sm font-semibold text-white tabular-nums w-16 text-center">
+              Week {weekNumber}
+            </p>
+            <button
+              type="button"
+              onClick={() => stepWeek(1)}
+              className="w-8 h-8 flex items-center justify-center rounded-lg bg-white/5 border border-white/8 hover:border-white/20 text-slate-400 hover:text-slate-200 transition-colors"
+            >
+              <ChevronUp className="w-4 h-4" strokeWidth={1.5} />
+            </button>
+            {isExisting && (
+              <span className="text-xs text-slate-600">editing</span>
+            )}
           </div>
         )}
 
-        {/* ── Team scores ── */}
+        {/* Instruction + counter */}
         <div>
-          <label className={labelCls}>Each team&apos;s score this week</label>
-          <p className="text-xs text-slate-600 mb-3">
-            The bottom {bottomCount} scorer{bottomCount > 1 ? "s" : ""} will each owe ${league.config.basePenalty.toLocaleString()}.
+          <p className="text-base font-semibold text-white mb-1">
+            {isFlipped
+              ? "Select this week's highest scorer"
+              : `Select the ${bottomCount} lowest scorer${bottomCount > 1 ? "s" : ""}`}
           </p>
-          <div className="space-y-2">
-            {league.teams.map((team) => (
-              <div key={team.id} className="flex items-center gap-3">
-                <span className="text-sm font-semibold text-white flex-1 truncate">{team.name}</span>
-                <input
-                  type="number"
-                  value={scores[team.id] ?? ""}
-                  onChange={(e) => setScores((prev) => ({ ...prev, [team.id]: e.target.value }))}
-                  onFocus={(e) => e.target.select()}
-                  placeholder="0"
-                  className={`${inputCls} w-24 text-right`}
-                  min={0}
-                  step="0.01"
-                />
-              </div>
-            ))}
-          </div>
+          <p className="text-xs text-slate-500">{selected.length} of {target} selected</p>
         </div>
 
-        {/* ── Live preview ── */}
-        {preview && (
-          <div>
-            <div className="flex items-center justify-between mb-2 px-1">
-              <p className="text-xs text-slate-500 uppercase tracking-widest">
-                This week&apos;s breakdown
-              </p>
-              <p className="text-xs font-semibold text-slate-400 tabular-nums">
-                +${previewTotal.toLocaleString()} to pot
-              </p>
-            </div>
-            <div className="bg-[#0d1420] border border-white/6 rounded-2xl overflow-hidden divide-y divide-white/6">
-              {preview.map(({ teamId, teamName, amount, reasons }) => (
-                <div key={teamId} className="flex items-start gap-3 px-4 py-3">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-white">{teamName}</p>
-                    {reasons.length > 0 ? (
-                      <p className="text-xs text-slate-600 mt-0.5 truncate">
-                        {reasons.join(" · ")}
-                      </p>
-                    ) : (
-                      <p className="text-xs text-emerald-600 mt-0.5">No charge</p>
-                    )}
-                  </div>
-                  <p
-                    className={`text-sm font-bold tabular-nums flex-shrink-0 ${
-                      amount > 0 ? "text-red-400" : "text-slate-600"
-                    }`}
-                  >
-                    {amount > 0 ? `-$${amount.toLocaleString()}` : "—"}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        {/* Team cards */}
+        <div className="space-y-2">
+          {league.teams.map((team) => {
+            const isSelected = selected.includes(team.id);
+            return (
+              <button
+                key={team.id}
+                type="button"
+                onClick={() => toggle(team.id)}
+                className={`w-full py-4 px-5 rounded-xl border text-left transition-all ${
+                  isSelected
+                    ? isFlipped
+                      ? "bg-emerald-500/10 border-emerald-500/40 text-white"
+                      : "bg-red-500/10 border-red-500/40 text-white"
+                    : "bg-white/3 border-white/8 text-slate-300 hover:border-white/20"
+                }`}
+              >
+                <span className="text-sm font-semibold">{team.name}</span>
+              </button>
+            );
+          })}
+        </div>
 
-        {/* ── Save error ── */}
+        {/* Error */}
         {saveError && (
-          <div className="flex items-start gap-2.5 bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-3">
-            <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" strokeWidth={1.5} />
-            <p className="text-sm text-red-400">{saveError}</p>
-          </div>
+          <p className="text-sm text-red-400">{saveError}</p>
         )}
 
-        {/* ── Incomplete prompt ── */}
-        {!allScoresEntered && (
-          <div className="flex items-start gap-2.5 bg-[#0d1420] border border-white/6 rounded-xl px-4 py-3">
-            <AlertCircle className="w-4 h-4 text-slate-600 flex-shrink-0 mt-0.5" strokeWidth={1.5} />
-            <p className="text-xs text-slate-600">Enter every team&apos;s score to submit.</p>
+        {/* Submit / saved */}
+        {saved ? (
+          <div className="flex items-center justify-center gap-2 py-3">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400" strokeWidth={1.5} />
+            <p className="text-sm font-semibold text-emerald-400">Week {weekNumber} saved</p>
           </div>
+        ) : (
+          <button
+            type="button"
+            onClick={submit}
+            disabled={!isReady || saving}
+            className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-30 disabled:cursor-not-allowed text-white font-semibold rounded-xl py-3 text-sm transition-colors"
+          >
+            {saving ? (
+              <>
+                <span className="w-3.5 h-3.5 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                Saving…
+              </>
+            ) : isExisting || editWeek ? (
+              `Update week ${editWeek ?? weekNumber}`
+            ) : (
+              `Submit week ${weekNumber}`
+            )}
+          </button>
         )}
-
-        <button
-          type="button"
-          onClick={submit}
-          disabled={!allScoresEntered || saving}
-          className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium rounded-xl py-2.5 text-sm transition-colors"
-        >
-          {saving ? (
-            <>
-              <span className="w-3.5 h-3.5 border-2 border-white/20 border-t-white rounded-full animate-spin" />
-              Saving…
-            </>
-          ) : (
-            editWeek ? `Update week ${editWeek}` : `Submit week ${weekNumber}`
-          )}
-        </button>
 
       </div>
     </main>
